@@ -16,7 +16,7 @@ jobs:
     steps:
     # 1. リポジトリのソースコードを取得（チェックアウト）
     - name: Checkout Repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     # 2. Notion APIの実行、Gemini APIによるコード生成、Notionの更新
     - name: Run Auto Generation and Move Kanban
