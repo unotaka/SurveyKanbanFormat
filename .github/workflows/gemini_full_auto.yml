@@ -26,7 +26,7 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
         echo "=== 1. Notionデータベースから『Claude生成待ち』のタスクを検索中 ==="
-        NOTION_RES=$(curl -s -X POST "https://api.notion.com/v1/databases/3664c3b4a172804c9ed0c40b6bf0d02b/query" \
+        NOTION_RES=$(curl -s -X POST "https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query" \
           -H "Authorization: Bearer ${NOTION_TOKEN}" \
           -H "Notion-Version: 2022-06-28" \
           -H "Content-Type: application/json" \
@@ -54,11 +54,34 @@ jobs:
         TASK_TITLE=$(echo "$NOTION_RES" | jq -r '.results[0].properties["名前"].title[0].text.content')
         echo "対象タスク: $TASK_TITLE"
 
-        echo "=== 2. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
-        # プロンプトを作成。挨拶やMarkdownのマークを一切省いてコードのみを返させるように強く制約します。
-        PROMPT="以下の要件を満たすJavaのソースコードのみを出力してください。解説文、挨拶、Markdownのコードブロックを示す装飾（\`\`\`java など）は絶対に含めず、生Javaコードのテキスト形式のみを出力してください。\\n\\n【要件】\\n$TASK_TITLE"
+        # Notionの「仕様・要件」プロパティ（リッチテキスト）を取得
+        REQUIREMENTS=$(echo "$NOTION_RES" | jq -r '.results[0].properties["仕様・要件"].rich_text[0].text.content // empty')
+        echo "=== 取得した仕様・要件 ==="
+        echo "$REQUIREMENTS"
+
+        echo "=== 2. パッケージ名とクラス名の抽出中 ==="
+        # 「仕様・要件」テキストから「パッケージ」を検索して抽出 (例: パッケージ：sample -> sample)
+        PKG_NAME=$(echo "$REQUIREMENTS" | grep -E 'パッケージ[：:]' | sed -E 's/.*パッケージ[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
         
-        # 安全にJSONボディを生成してGemini APIに送信（現在最も無料枠が広いモデルである2.5-flashを使用）
+        # 「仕様・要件」テキストから「クラス名」を検索して抽出 (例: クラス名: UserRegistrationDto -> UserRegistrationDto)
+        CLASS_NAME=$(echo "$REQUIREMENTS" | grep -E 'クラス名[：:]' | sed -E 's/.*クラス名[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
+
+        echo "抽出されたパッケージ名: $PKG_NAME"
+        echo "抽出されたクラス名: $CLASS_NAME"
+
+        echo "=== 3. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
+        # プロンプトの構築（Notionから読み取った情報をGeminiに引き継ぐ）
+        PROMPT="以下の要件に基づき、Javaのソースコードを出力してください。"
+        
+        if [ -n "$PKG_NAME" ]; then
+          PROMPT="${PROMPT}\\n- 指定パッケージ名: $PKG_NAME"
+        fi
+        if [ -n "$CLASS_NAME" ]; then
+          PROMPT="${PROMPT}\\n- 指定クラス名: $CLASS_NAME"
+        fi
+
+        PROMPT="${PROMPT}\\n\\n【タスク内容】\\n$TASK_TITLE\\n\\n【詳細な仕様・要件】\\n$REQUIREMENTS\\n\\n※注意: 出力はJavaのソースコードのみとしてください。解説文、挨拶、Markdownのコードブロックを示す装飾（\`\`\`java など）は絶対に含めず、純粋な生Javaコードのテキスト形式のみを出力してください。"
+        
         PAYLOAD=$(jq -n \
           --arg prompt "$PROMPT" \
           '{
@@ -78,11 +101,42 @@ jobs:
           exit 1
         fi
 
-        # コードをファイル「GeneratedService.java」として保存します
-        echo "$JAVA_CODE" > GeneratedService.java
-        echo "GeneratedService.java の作成に成功しました。"
+        echo "=== 4. 保存先フォルダ構成の作成とソースコードの書き出し ==="
+        # パッケージ名に基づくフォルダパスの決定
+        if [ -n "$PKG_NAME" ]; then
+          # ドット (.) をスラッシュ (/) に変換してMaven標準パスに統合します
+          DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
+        else
+          # パッケージ名が仕様・要件から取れなかった場合は、念のため生成されたコードから自動判定します
+          CODE_PKG=$(echo "$JAVA_CODE" | grep -E '^[[:space:]]*package[[:space:]]+' | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/')
+          if [ -n "$CODE_PKG" ]; then
+            DIR_PATH="src/main/java/$(echo "$CODE_PKG" | tr '.' '/')"
+          else
+            DIR_PATH="src/main/java"
+          fi
+        fi
 
-        echo "=== 3. Notionのかんばんボードを『Git格納済み』に移動中 ==="
+        # クラス名に基づくファイル名の決定
+        if [ -n "$CLASS_NAME" ]; then
+          FILE_NAME="${CLASS_NAME}.java"
+        else
+          # クラス名が仕様・要件から取れなかった場合は、生成されたコードから自動判定します
+          CODE_CLASS=$(echo "$JAVA_CODE" | grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/')
+          if [ -n "$CODE_CLASS" ]; then
+            FILE_NAME="${CODE_CLASS}.java"
+          else
+            FILE_NAME="GeneratedService.java"
+          fi
+        fi
+
+        FILE_PATH="${DIR_PATH}/${FILE_NAME}"
+
+        # フォルダを作成し、ファイルをUTF-8で保存
+        mkdir -p "$DIR_PATH"
+        echo "$JAVA_CODE" > "$FILE_PATH"
+        echo "=== ソースファイルを正常に書き出しました: $FILE_PATH ==="
+
+        echo "=== 5. Notionのかんばんボードを『Git格納済み』に移動中 ==="
         curl -s -X PATCH "https://api.notion.com/v1/pages/${PAGE_ID}" \
           -H "Authorization: Bearer ${NOTION_TOKEN}" \
           -H "Notion-Version: 2022-06-28" \
@@ -105,8 +159,8 @@ jobs:
         git config --local user.name "Gemini-Full-Auto-Bot"
         
         if [ -n "$(git status --porcelain)" ]; then
-          git add GeneratedService.java
-          git commit -m "feat: GeminiがNotionタスクに基づいてJavaコードを自動生成"
+          git add src/
+          git commit -m "feat: Notionの仕様・要件を解析してJavaコードを自動生成"
           git push
           echo "Gitリポジトリへの自動コミットおよびプッシュが完了しました！"
         else
