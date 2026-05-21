@@ -51,7 +51,7 @@ jobs:
         fi
 
         # タスク名（要件）を抽出
-        TASK_TITLE=$(echo "$NOTION_RES" | jq -r '.results[0].properties.名前.title[0].text.content')
+        TASK_TITLE=$(echo "$NOTION_RES" | jq -r '.results[0].properties["名前"].title[0].text.content')
         echo "対象タスク: $TASK_TITLE"
 
         echo "=== 2. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
