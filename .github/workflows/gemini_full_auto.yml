@@ -26,7 +26,7 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
         echo "=== 1. Notionデータベースから『Claude生成待ち』のタスクを検索中 ==="
-        NOTION_RES=$(curl -s -X POST "https://api.notion.com/v1/databases/3664c3b4a172804d9fae000b6f884da2/query" \
+        NOTION_RES=$(curl -s -X POST "https://api.notion.com/v1/databases/3664c3b4a172804c9ed0c40b6bf0d02b/query" \
           -H "Authorization: Bearer ${NOTION_TOKEN}" \
           -H "Notion-Version: 2022-06-28" \
           -H "Content-Type: application/json" \
