@@ -1,0 +1,108 @@
+name: Gemini Full Auto Developer
+
+on:
+  workflow_dispatch: # GitHubのウェブ画面から1クリックで手動実行を可能にします
+  # もし1時間ごとにNotionを監視させたい場合は、以下のコメントアウトを外して有効化してください
+  # schedule:
+  #   - cron: '0 * * * *'
+
+jobs:
+  full-auto-dev:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. リポジトリのソースコードを取得（チェックアウト）
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # 2. Notion APIの実行、Gemini APIによるコード生成、Notionの更新
+    - name: Run Auto Generation and Move Kanban
+      env:
+        NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        echo "=== 1. Notionデータベースから『Claude生成待ち』のタスクを検索中 ==="
+        NOTION_RES=$(curl -s -X POST "https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query" \
+          -H "Authorization: Bearer ${NOTION_TOKEN}" \
+          -H "Notion-Version: 2022-06-28" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "filter": {
+              "property": "ステータス",
+              "status": {
+                "equals": "Claude生成待ち"
+              }
+            }
+          }')
+
+        # 該当する最初のタスクのページIDを取得
+        PAGE_ID=$(echo "$NOTION_RES" | jq -r '.results[0].id // empty')
+        
+        if [ -z "$PAGE_ID" ] || [ "$PAGE_ID" = "null" ]; then
+          echo "「Claude生成待ち」のタスクは見つかりませんでした。処理を終了します。"
+          exit 0
+        fi
+
+        # タスク名（要件）を抽出
+        TASK_TITLE=$(echo "$NOTION_RES" | jq -r '.results[0].properties.名前.title[0].text.content')
+        echo "対象タスク: $TASK_TITLE"
+
+        echo "=== 2. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
+        # プロンプトを作成。挨拶やMarkdownのマークを一切省いてコードのみを返させるように強く制約します。
+        PROMPT="以下の要件を満たすJavaのソースコードのみを出力してください。解説文、挨拶、Markdownのコードブロックを示す装飾（\`\`\`java など）は絶対に含めず、生Javaコードのテキスト形式のみを出力してください。\\n\\n【要件】\\n$TASK_TITLE"
+        
+        # 安全にJSONボディを生成してGemini APIに送信（現在最も無料枠が広いモデルである2.5-flashを使用）
+        PAYLOAD=$(jq -n \
+          --arg prompt "$PROMPT" \
+          '{
+            contents: [{parts: [{text: $prompt}]}]
+          }')
+
+        GEMINI_RES=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD")
+
+        # 生成コードの解析
+        JAVA_CODE=$(echo "$GEMINI_RES" | jq -r '.candidates[0].content.parts[0].text // empty')
+
+        if [ -z "$JAVA_CODE" ] || [ "$JAVA_CODE" = "null" ]; then
+          echo "Gemini APIからのレスポンス解析に失敗しました。APIキーまたは上限設定を確認してください。APIレスポンス:"
+          echo "$GEMINI_RES"
+          exit 1
+        fi
+
+        # コードをファイル「GeneratedService.java」として保存します
+        echo "$JAVA_CODE" > GeneratedService.java
+        echo "GeneratedService.java の作成に成功しました。"
+
+        echo "=== 3. Notionのかんばんボードを『Git格納済み』に移動中 ==="
+        curl -s -X PATCH "https://api.notion.com/v1/pages/${PAGE_ID}" \
+          -H "Authorization: Bearer ${NOTION_TOKEN}" \
+          -H "Notion-Version: 2022-06-28" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "properties": {
+              "ステータス": {
+                "status": {
+                  "name": "Git格納済み"
+                }
+              }
+            }
+          }' > /dev/null
+        echo "Notionのステータス更新が完了しました。"
+
+    # 3. 変更があった場合にGitへ自動コミット＆プッシュを実行
+    - name: Commit and Push Changes to Repository
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "Gemini-Full-Auto-Bot"
+        
+        if [ -n "$(git status --porcelain)" ]; then
+          git add GeneratedService.java
+          git commit -m "feat: GeminiがNotionタスクに基づいてJavaコードを自動生成"
+          git push
+          echo "Gitリポジトリへの自動コミットおよびプッシュが完了しました！"
+        else
+          echo "生成コードに未変更、または更新が不要なためスキップします。"
+        fi
