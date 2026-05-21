@@ -39,6 +39,9 @@ jobs:
             }
           }')
 
+        # デバッグ
+        echo "=== デバッグ: Notion APIからの生の応答 ===" && echo "$NOTION_RES"
+
         # 該当する最初のタスクのページIDを取得
         PAGE_ID=$(echo "$NOTION_RES" | jq -r '.results[0].id // empty')
         
