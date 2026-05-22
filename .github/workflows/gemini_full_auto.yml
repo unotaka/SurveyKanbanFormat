@@ -17,6 +17,8 @@ jobs:
     # 1. リポジトリのソースコードを取得（チェックアウト）
     - name: Checkout Repository
       uses: actions/checkout@v5
+      with:
+        fetch-depth: 0 # すべてのブランチ履歴を取得します
 
     # 2. Notion APIの実行、Gemini APIによるコード生成、Notionの更新
     - name: Run Auto Generation and Move Kanban
@@ -70,18 +72,29 @@ jobs:
         echo "抽出されたクラス名: $CLASS_NAME"
 
         echo "=== 3. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
-        # プロンプトの構築（Notionから読み取った情報をGeminiに引き継ぐ）
-        PROMPT="以下の要件に基づき、Javaのソースコードを出力してください。"
+        # プロンプトの構築（複数ファイル出力に対応させるための指示を追加）
+        PROMPT="以下の要件に基づき、Javaのソースコードを出力してください。要件を満たすために複数のクラス、インターフェース、例外、DTOなどが必要な場合は、それらをすべて出力してください。"
         
         if [ -n "$PKG_NAME" ]; then
-          PROMPT="${PROMPT}\\n- 指定パッケージ名: $PKG_NAME"
+          PROMPT="${PROMPT}\\n- 指定デフォルトパッケージ名: $PKG_NAME"
         fi
         if [ -n "$CLASS_NAME" ]; then
-          PROMPT="${PROMPT}\\n- 指定クラス名: $CLASS_NAME"
+          PROMPT="${PROMPT}\\n- メインとなる指定クラス名: $CLASS_NAME"
         fi
 
-        PROMPT="${PROMPT}\\n\\n【タスク内容】\\n$TASK_TITLE\\n\\n【詳細な仕様・要件】\\n$REQUIREMENTS\\n\\n※注意: 出力はJavaのソースコードのみとしてください。解説文、挨拶、Markdownのコードブロックを示す装飾（\`\`\`java など）は絶対に含めず、純粋な生Javaコードのテキスト形式のみを出力してください。"
-        
+        PROMPT="${PROMPT}\\n\\n【タスク内容】\\n$TASK_TITLE\\n\\n【詳細な仕様・要件】\\n$REQUIREMENTS"
+        PROMPT="${PROMPT}\\n\\n※【重要・出力フォーマットの厳守】"
+        PROMPT="${PROMPT}\\n複数のファイルを出力する場合は、後からスクリプトで分割できるように、必ず以下の形式でファイルごとに区切って出力してください。解説文や挨拶は一切含めないでください。"
+        PROMPT="${PROMPT}\\n"
+        PROMPT="${PROMPT}\\n--- FILE: src/main/java/path/to/ClassName.java ---"
+        PROMPT="${PROMPT}\\npackage path.to;"
+        PROMPT="${PROMPT}\\npublic class ClassName {"
+        PROMPT="${PROMPT}\\n    ... "
+        PROMPT="${PROMPT}\\n}"
+        PROMPT="${PROMPT}\\n--- END FILE ---"
+        PROMPT="${PROMPT}\\n"
+        PROMPT="${PROMPT}\\n1つのファイルしかない場合でも、必ず上記の \`--- FILE: パス ---\` と \`--- END FILE ---\` の行で囲んで出力してください。"
+
         PAYLOAD=$(jq -n \
           --arg prompt "$PROMPT" \
           '{
@@ -101,40 +114,63 @@ jobs:
           exit 1
         fi
 
-        echo "=== 4. 保存先フォルダ構成の作成とソースコードの書き出し ==="
-        # パッケージ名に基づくフォルダパスの決定
-        if [ -n "$PKG_NAME" ]; then
-          # ドット (.) をスラッシュ (/) に変換してMaven標準パスに統合します
-          DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
-        else
-          # パッケージ名が仕様・要件から取れなかった場合は、念のため生成されたコードから自動判定します
-          CODE_PKG=$(echo "$JAVA_CODE" | grep -E '^[[:space:]]*package[[:space:]]+' | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/')
-          if [ -n "$CODE_PKG" ]; then
-            DIR_PATH="src/main/java/$(echo "$CODE_PKG" | tr '.' '/')"
+        echo "=== 4. 複数ファイルの解析と書き出し ==="
+        # プロンプトの指定形式に従ってファイルを切り出す
+        echo "$JAVA_CODE" | awk '
+          /^--- FILE: .* ---$/ {
+            match($0, /--- FILE: (.*) ---/, arr);
+            filepath = arr[1];
+            
+            dirpath = filepath;
+            sub(/\/[^\/]+$/, "", dirpath);
+            system("mkdir -p \"" dirpath "\"");
+            
+            print "書き出し中: " filepath;
+            is_writing = 1;
+            next;
+          }
+          /^--- END FILE ---$/ {
+            is_writing = 0;
+            close(filepath);
+            next;
+          }
+          {
+            if (is_writing) {
+              print $0 > filepath;
+            }
+          }
+        '
+
+        # 万が一、Geminiが指定フォーマットを無視して生コードを直出ししてきた場合のフォールバック
+        if [ ! -d "src/main/java" ] || [ -z "$(find src/main/java -name '*.java' 2>/dev/null)" ]; then
+          echo "警告: 指定フォーマットでのパースに失敗したか、ファイルが生成されませんでした。単一ファイルとしてフォールバック処理を行います。"
+          
+          if [ -n "$PKG_NAME" ]; then
+            DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
           else
-            DIR_PATH="src/main/java"
+            CODE_PKG=$(echo "$JAVA_CODE" | grep -E '^[[:space:]]*package[[:space:]]+' | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/' | head -n 1)
+            if [ -n "$CODE_PKG" ]; then
+              DIR_PATH="src/main/java/$(echo "$CODE_PKG" | tr '.' '/')"
+            else
+              DIR_PATH="src/main/java"
+            fi
           fi
-        fi
 
-        # クラス名に基づくファイル名の決定
-        if [ -n "$CLASS_NAME" ]; then
-          FILE_NAME="${CLASS_NAME}.java"
-        else
-          # クラス名が仕様・要件から取れなかった場合は、生成されたコードから自動判定します
-          CODE_CLASS=$(echo "$JAVA_CODE" | grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/')
-          if [ -n "$CODE_CLASS" ]; then
-            FILE_NAME="${CODE_CLASS}.java"
+          if [ -n "$CLASS_NAME" ]; then
+            FILE_NAME="${CLASS_NAME}.java"
           else
-            FILE_NAME="GeneratedService.java"
+            CODE_CLASS=$(echo "$JAVA_CODE" | grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/' | head -n 1)
+            if [ -n "$CODE_CLASS" ]; then
+              FILE_NAME="${CODE_CLASS}.java"
+            else
+              FILE_NAME="GeneratedService.java"
+            fi
           fi
+
+          mkdir -p "$DIR_PATH"
+          echo "$JAVA_CODE" > "${DIR_PATH}/${FILE_NAME}"
+          echo "フォールバックで保存しました: ${DIR_PATH}/${FILE_NAME}"
         fi
-
-        FILE_PATH="${DIR_PATH}/${FILE_NAME}"
-
-        # フォルダを作成し、ファイルをUTF-8で保存
-        mkdir -p "$DIR_PATH"
-        echo "$JAVA_CODE" > "$FILE_PATH"
-        echo "=== ソースファイルを正常に書き出しました: $FILE_PATH ==="
 
         echo "=== 5. Notionのかんばんボードを『Git格納済み』に移動中 ==="
         curl -s -X PATCH "https://api.notion.com/v1/pages/${PAGE_ID}" \
@@ -152,17 +188,24 @@ jobs:
           }' > /dev/null
         echo "Notionのステータス更新が完了しました。"
 
-    # 3. 変更があった場合にGitへ自動コミット＆プッシュを実行
+    # 3. 変更があった場合にaicreateブランチへ自動コミット＆プッシュを実行
     - name: Commit and Push Changes to Repository
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "Gemini-Full-Auto-Bot"
         
+        # aicreateブランチに切り替え（ローカル・リモートになければ新規作成）
+        if git show-ref --verify --quiet refs/remotes/origin/aicreate; then
+          git checkout aicreate
+        else
+          git checkout -b aicreate
+        fi
+        
         if [ -n "$(git status --porcelain)" ]; then
           git add src/
-          git commit -m "feat: Notionの仕様・要件を解析してJavaコードを自動生成"
-          git push
-          echo "Gitリポジトリへの自動コミットおよびプッシュが完了しました！"
+          git commit -m "feat: Notionの仕様・要件を解析してJavaコードを自動生成（複数ファイル対応）"
+          git push -u origin aicreate
+          echo "Gitリポジトリ（aicreateブランチ）への自動コミットおよびプッシュが完了しました！"
         else
           echo "生成コードに未変更、または更新が不要なためスキップします。"
         fi
