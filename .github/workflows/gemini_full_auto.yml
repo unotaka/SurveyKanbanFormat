@@ -25,8 +25,19 @@ jobs:
       env:
         NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
         NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        NOTION_RULES_PAGE_ID: ${{ secrets.NOTION_RULES_PAGE_ID }} # 共通ルールページのID
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
+        echo "=== 0. Notionから共通のソース生成ルールを取得中 ==="
+        # ルールページのブロック情報を取得してテキストに結合
+        RULES_RES=$(curl -s -X GET "https://api.notion.com/v1/blocks/${NOTION_RULES_PAGE_ID}/children" \
+          -H "Authorization: Bearer ${NOTION_TOKEN}" \
+          -H "Notion-Version: 2022-06-28")
+        
+        # 箇条書きや段落のテキストを抽出して1つの変数にまとめる
+        GLOBAL_RULES=$(echo "$RULES_RES" | jq -r '.results[].paragraph.rich_text[0].plain_text // .results[].bulleted_list_item.rich_text[0].plain_text // empty' | tr '\n' ' ')
+        echo "取得した共通ルール: $GLOBAL_RULES"
+
         echo "=== 1. Notionデータベースから『Claude生成待ち』の全タスクを検索中 ==="
         NOTION_RES=$(curl -s -X POST "https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query" \
           -H "Authorization: Bearer ${NOTION_TOKEN}" \
