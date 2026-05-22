@@ -27,7 +27,7 @@ jobs:
         NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
-        echo "=== 1. Notionデータベースから『Claude生成待ち』のタスクを検索中 ==="
+        echo "=== 1. Notionデータベースから『Claude生成待ち』の全タスクを検索中 ==="
         NOTION_RES=$(curl -s -X POST "https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query" \
           -H "Authorization: Bearer ${NOTION_TOKEN}" \
           -H "Notion-Version: 2022-06-28" \
@@ -44,151 +44,161 @@ jobs:
         # デバッグ
         echo "=== デバッグ: Notion APIからの生の応答 ===" && echo "$NOTION_RES"
 
-        # 該当する最初のタスクのページIDを取得
-        PAGE_ID=$(echo "$NOTION_RES" | jq -r '.results[0].id // empty')
+        # 該当するすべてのタスクのインデックス数を取得
+        TASK_COUNT=$(echo "$NOTION_RES" | jq '.results | length')
         
-        if [ -z "$PAGE_ID" ] || [ "$PAGE_ID" = "null" ]; then
+        if [ "$TASK_COUNT" -eq 0 ]; then
           echo "「Claude生成待ち」のタスクは見つかりませんでした。処理を終了します。"
           exit 0
         fi
 
-        # タスク名（要件）を抽出
-        TASK_TITLE=$(echo "$NOTION_RES" | jq -r '.results[0].properties["名前"].title[0].text.content')
-        echo "対象タスク: $TASK_TITLE"
+        echo "発見されたタスク数: ${TASK_COUNT}件。順次処理を開始します。"
 
-        # Notionの「仕様・要件」プロパティ（リッチテキスト）を取得
-        REQUIREMENTS=$(echo "$NOTION_RES" | jq -r '.results[0].properties["仕様・要件"].rich_text[0].text.content // empty')
-        echo "=== 取得した仕様・要件 ==="
-        echo "$REQUIREMENTS"
+        # 各タスクをループ処理
+        for ((i=0; i<TASK_COUNT; i++)); do
+          PAGE_ID=$(echo "$NOTION_RES" | jq -r ".results[$i].id")
+          TASK_TITLE=$(echo "$NOTION_RES" | jq -r ".results[$i].properties[\"名前\"].title[0].text.content")
+          
+          echo "--------------------------------------------------"
+          echo "[$((i+1))/${TASK_COUNT}] 処理中: $TASK_TITLE (PageID: $PAGE_ID)"
+          echo "--------------------------------------------------"
 
-        echo "=== 2. パッケージ名とクラス名の抽出中 ==="
-        # 「仕様・要件」テキストから「パッケージ」を検索して抽出 (例: パッケージ：sample -> sample)
-        PKG_NAME=$(echo "$REQUIREMENTS" | grep -E 'パッケージ[：:]' | sed -E 's/.*パッケージ[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
-        
-        # 「仕様・要件」テキストから「クラス名」を検索して抽出 (例: クラス名: UserRegistrationDto -> UserRegistrationDto)
-        CLASS_NAME=$(echo "$REQUIREMENTS" | grep -E 'クラス名[：:]' | sed -E 's/.*クラス名[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
+          # Notionの「仕様・要件」プロパティ（リッチテキスト）を取得
+          REQUIREMENTS=$(echo "$NOTION_RES" | jq -r ".results[$i].properties[\"仕様・要件\"].rich_text[0].text.content // empty")
+          echo "=== 取得した仕様・要件 ==="
+          echo "$REQUIREMENTS"
 
-        echo "抽出されたパッケージ名: $PKG_NAME"
-        echo "抽出されたクラス名: $CLASS_NAME"
+          echo "=== 2. パッケージ名とクラス名の抽出中 ==="
+          PKG_NAME=$(echo "$REQUIREMENTS" | grep -E 'パッケージ[：:]' | sed -E 's/.*パッケージ[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
+          CLASS_NAME=$(echo "$REQUIREMENTS" | grep -E 'クラス名[：:]' | sed -E 's/.*クラス名[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
 
-        echo "=== 3. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
-        # プロンプトの構築（複数ファイル出力に対応させるための指示を追加）
-        PROMPT="以下の要件に基づき、Javaのソースコードを出力してください。要件を満たすために複数のクラス、インターフェース、例外、DTOなどが必要な場合は、それらをすべて出力してください。"
-        
-        if [ -n "$PKG_NAME" ]; then
-          PROMPT="${PROMPT}\\n- 指定デフォルトパッケージ名: $PKG_NAME"
-        fi
-        if [ -n "$CLASS_NAME" ]; then
-          PROMPT="${PROMPT}\\n- メインとなる指定クラス名: $CLASS_NAME"
-        fi
+          echo "抽出されたパッケージ名: $PKG_NAME"
+          echo "抽出されたクラス名: $CLASS_NAME"
 
-        PROMPT="${PROMPT}\\n\\n【タスク内容】\\n$TASK_TITLE\\n\\n【詳細な仕様・要件】\\n$REQUIREMENTS"
-        PROMPT="${PROMPT}\\n\\n※【重要・出力フォーマットの厳守】"
-        PROMPT="${PROMPT}\\n複数のファイルを出力する場合は、後からスクリプトで分割できるように、必ず以下の形式でファイルごとに区切って出力してください。解説文や挨拶は一切含めないでください。"
-        PROMPT="${PROMPT}\\n"
-        PROMPT="${PROMPT}\\n--- FILE: src/main/java/path/to/ClassName.java ---"
-        PROMPT="${PROMPT}\\npackage path.to;"
-        PROMPT="${PROMPT}\\npublic class ClassName {"
-        PROMPT="${PROMPT}\\n    ... "
-        PROMPT="${PROMPT}\\n}"
-        PROMPT="${PROMPT}\\n--- END FILE ---"
-        PROMPT="${PROMPT}\\n"
-        PROMPT="${PROMPT}\\n1つのファイルしかない場合でも、必ず上記の \`--- FILE: パス ---\` と \`--- END FILE ---\` の行で囲んで出力してください。"
-
-        PAYLOAD=$(jq -n \
-          --arg prompt "$PROMPT" \
-          '{
-            contents: [{parts: [{text: $prompt}]}]
-          }')
-
-        GEMINI_RES=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
-          -H "Content-Type: application/json" \
-          -d "$PAYLOAD")
-
-        # 生成コードの解析
-        JAVA_CODE=$(echo "$GEMINI_RES" | jq -r '.candidates[0].content.parts[0].text // empty')
-
-        if [ -z "$JAVA_CODE" ] || [ "$JAVA_CODE" = "null" ]; then
-          echo "Gemini APIからのレスポンス解析に失敗しました。APIキーまたは上限設定を確認してください。APIレスポンス:"
-          echo "$GEMINI_RES"
-          exit 1
-        fi
-
-        echo "=== 4. 複数ファイルの解析と書き出し ==="
-        # プロンプトの指定形式に従ってファイルを切り出す
-        echo "$JAVA_CODE" | awk '
-          /^--- FILE: .* ---$/ {
-            match($0, /--- FILE: (.*) ---/, arr);
-            filepath = arr[1];
-            
-            dirpath = filepath;
-            sub(/\/[^\/]+$/, "", dirpath);
-            system("mkdir -p \"" dirpath "\"");
-            
-            print "書き出し中: " filepath;
-            is_writing = 1;
-            next;
-          }
-          /^--- END FILE ---$/ {
-            is_writing = 0;
-            close(filepath);
-            next;
-          }
-          {
-            if (is_writing) {
-              print $0 > filepath;
-            }
-          }
-        '
-
-        # 万が一、Geminiが指定フォーマットを無視して生コードを直出ししてきた場合のフォールバック
-        if [ ! -d "src/main/java" ] || [ -z "$(find src/main/java -name '*.java' 2>/dev/null)" ]; then
-          echo "警告: 指定フォーマットでのパースに失敗したか、ファイルが生成されませんでした。単一ファイルとしてフォールバック処理を行います。"
+          echo "=== 3. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
+          PROMPT="以下の要件に基づき、Javaのソースコードを出力してください。要件を満たすために複数のクラス、インターフェース、例外、DTOなどが必要な場合は、それらをすべて出力してください。"
           
           if [ -n "$PKG_NAME" ]; then
-            DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
-          else
-            CODE_PKG=$(echo "$JAVA_CODE" | grep -E '^[[:space:]]*package[[:space:]]+' | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/' | head -n 1)
-            if [ -n "$CODE_PKG" ]; then
-              DIR_PATH="src/main/java/$(echo "$CODE_PKG" | tr '.' '/')"
-            else
-              DIR_PATH="src/main/java"
-            fi
+            PROMPT="${PROMPT}\\n- 指定デフォルトパッケージ名: $PKG_NAME"
           fi
-
           if [ -n "$CLASS_NAME" ]; then
-            FILE_NAME="${CLASS_NAME}.java"
-          else
-            CODE_CLASS=$(echo "$JAVA_CODE" | grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/' | head -n 1)
-            if [ -n "$CODE_CLASS" ]; then
-              FILE_NAME="${CODE_CLASS}.java"
-            else
-              FILE_NAME="GeneratedService.java"
-            fi
+            PROMPT="${PROMPT}\\n- メインとなる指定クラス名: $CLASS_NAME"
           fi
 
-          mkdir -p "$DIR_PATH"
-          echo "$JAVA_CODE" > "${DIR_PATH}/${FILE_NAME}"
-          echo "フォールバックで保存しました: ${DIR_PATH}/${FILE_NAME}"
-        fi
+          PROMPT="${PROMPT}\\n\\n【タスク内容】\\n$TASK_TITLE\\n\\n【詳細な仕様・要件】\\n$REQUIREMENTS"
+          PROMPT="${PROMPT}\\n\\n※【重要・出力フォーマットの厳守】"
+          PROMPT="${PROMPT}\\n複数のファイルを出力する場合は、後からスクリプトで分割できるように、必ず以下の形式でファイルごとに区切って出力してください。解説文や挨拶は一切含めないでください。"
+          PROMPT="${PROMPT}\\n"
+          PROMPT="${PROMPT}\\n--- FILE: src/main/java/path/to/ClassName.java ---"
+          PROMPT="${PROMPT}\\npackage path.to;"
+          PROMPT="${PROMPT}\\npublic class ClassName {"
+          PROMPT="${PROMPT}\\n    ... "
+          PROMPT="${PROMPT}\\n}"
+          PROMPT="${PROMPT}\\n--- END FILE ---"
+          PROMPT="${PROMPT}\\n"
+          PROMPT="${PROMPT}\\n1つのファイルしかない場合でも、必ず上記の \`--- FILE: パス ---\` と \`--- END FILE ---\` の行で囲んで出力してください。"
 
-        echo "=== 5. Notionのかんばんボードを『Git格納済み』に移動中 ==="
-        curl -s -X PATCH "https://api.notion.com/v1/pages/${PAGE_ID}" \
-          -H "Authorization: Bearer ${NOTION_TOKEN}" \
-          -H "Notion-Version: 2022-06-28" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "properties": {
-              "ステータス": {
-                "status": {
-                  "name": "Git格納済み"
-                }
+          PAYLOAD=$(jq -n \
+            --arg prompt "$PROMPT" \
+            '{
+              contents: [{parts: [{text: $prompt}]}]
+            }')
+
+          GEMINI_RES=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          JAVA_CODE=$(echo "$GEMINI_RES" | jq -r '.candidates[0].content.parts[0].text // empty')
+
+          if [ -z "$JAVA_CODE" ] || [ "$JAVA_CODE" = "null" ]; then
+            echo "警告: Gemini APIからのレスポンス解析に失敗したため、このタスクをスキップします。"
+            echo "$GEMINI_RES"
+            continue
+          fi
+
+          echo "=== 4. 複数ファイルの解析と書き出し ==="
+          echo "$JAVA_CODE" | awk '
+            /^--- FILE: .* ---$/ {
+              match($0, /--- FILE: (.*) ---/, arr);
+              filepath = arr[1];
+              
+              dirpath = filepath;
+              sub(/\/[^\/]+$/, "", dirpath);
+              system("mkdir -p \"" dirpath "\"");
+              
+              print "書き出し中: " filepath;
+              is_writing = 1;
+              next;
+            }
+            /^--- END FILE ---$/ {
+              is_writing = 0;
+              close(filepath);
+              next;
+            }
+            {
+              if (is_writing) {
+                print $0 > filepath;
               }
             }
-          }' > /dev/null
-        echo "Notionのステータス更新が完了しました。"
+          '
 
-    # 3. 変更があった場合にaicreateブランチへ自動コミット＆プッシュを実行
+          # フォールバック処理
+          # ※複数タスクがあるため、チェック範囲をこのタスクで想定されるフォルダに絞るか、簡易的な存在チェックにします
+          if [ -z "$PKG_NAME" ] && [ -z "$CLASS_NAME" ]; then
+             # 両方空のときだけ大雑把にチェック
+             CHECK_DIR="src/main/java"
+          else
+             CHECK_DIR="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
+          fi
+
+          if [ ! -d "$CHECK_DIR" ] || [ -z "$(find "$CHECK_DIR" -name '*.java' 2>/dev/null)" ]; then
+            echo "警告: 指定フォーマットでのパースに失敗したため、単一ファイルとしてフォールバック処理を行います。"
+            
+            if [ -n "$PKG_NAME" ]; then
+              DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
+            else
+              CODE_PKG=$(echo "$JAVA_CODE" | grep -E '^[[:space:]]*package[[:space:]]+' | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/' | head -n 1)
+              if [ -n "$CODE_PKG" ]; then
+                DIR_PATH="src/main/java/$(echo "$CODE_PKG" | tr '.' '/')"
+              else
+                DIR_PATH="src/main/java"
+              fi
+            fi
+
+            if [ -n "$CLASS_NAME" ]; then
+              FILE_NAME="${CLASS_NAME}.java"
+            else
+              CODE_CLASS=$(echo "$JAVA_CODE" | grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/' | head -n 1)
+              if [ -n "$CODE_CLASS" ]; then
+                FILE_NAME="${CODE_CLASS}.java"
+              else
+                FILE_NAME="GeneratedService_$i.java"
+              fi
+            fi
+
+            mkdir -p "$DIR_PATH"
+            echo "$JAVA_CODE" > "${DIR_PATH}/${FILE_NAME}"
+            echo "フォールバックで保存しました: ${DIR_PATH}/${FILE_NAME}"
+          fi
+
+          echo "=== 5. Notionのかんばんボードを『Git格納済み』に移動中 ==="
+          curl -s -X PATCH "https://api.notion.com/v1/pages/${PAGE_ID}" \
+            -H "Authorization: Bearer ${NOTION_TOKEN}" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "properties": {
+                "ステータス": {
+                  "status": {
+                    "name": "Git格納済み"
+                  }
+                }
+              }
+            }' > /dev/null
+          echo "Notionのステータス更新が完了しました。"
+        done
+
+    # 3. 全てのタスク処理完了後、変更があった場合にaicreateブランチへ一括自動コミット＆プッシュを実行
     - name: Commit and Push Changes to Repository
       run: |
         git config --local user.email "action@github.com"
@@ -203,7 +213,7 @@ jobs:
         
         if [ -n "$(git status --porcelain)" ]; then
           git add src/
-          git commit -m "feat: Notionの仕様・要件を解析してJavaコードを自動生成（複数ファイル対応）"
+          git commit -m "feat: Notionの仕様・要件を解析してJavaコードを一括自動生成"
           git push -u origin aicreate
           echo "Gitリポジトリ（aicreateブランチ）への自動コミットおよびプッシュが完了しました！"
         else
