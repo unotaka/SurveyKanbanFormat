@@ -2,44 +2,27 @@ package com.example.user.dto;
 
 import java.util.Objects;
 
-/**
- * ユーザー登録処理の結果を返すためのDTOクラスです。
- */
 public class UserRegistrationResponse {
-    private String userId;
-    private String username;
-    private String email;
+    private boolean success;
     private String message;
+    private Long userId;
 
-    public UserRegistrationResponse(String userId, String username, String email, String message) {
-        this.userId = userId;
-        this.username = username;
-        this.email = email;
+    public UserRegistrationResponse(boolean success, String message, Long userId) {
+        this.success = success;
         this.message = message;
-    }
-
-    public String getUserId() {
-        return userId;
-    }
-
-    public void setUserId(String userId) {
         this.userId = userId;
     }
 
-    public String getUsername() {
-        return username;
+    public UserRegistrationResponse(boolean success, String message) {
+        this(success, message, null);
     }
 
-    public void setUsername(String username) {
-        this.username = username;
+    public boolean isSuccess() {
+        return success;
     }
 
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
+    public void setSuccess(boolean success) {
+        this.success = success;
     }
 
     public String getMessage() {
@@ -50,26 +33,33 @@ public class UserRegistrationResponse {
         this.message = message;
     }
 
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         UserRegistrationResponse that = (UserRegistrationResponse) o;
-        return Objects.equals(userId, that.userId) && Objects.equals(username, that.username) && Objects.equals(email, that.email) && Objects.equals(message, that.message);
+        return success == that.success && Objects.equals(message, that.message) && Objects.equals(userId, that.userId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(userId, username, email, message);
+        return Objects.hash(success, message, userId);
     }
 
     @Override
     public String toString() {
         return "UserRegistrationResponse{" +
-               "userId='" + userId + '\'' +
-               ", username='" + username + '\'' +
-               ", email='" + email + '\'' +
+               "success=" + success +
                ", message='" + message + '\'' +
+               ", userId=" + userId +
                '}';
     }
 }

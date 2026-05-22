@@ -2,13 +2,13 @@ package com.example.user.dto;
 
 import java.util.Objects;
 
-/**
- * ユーザー登録処理の入力データを受け取るためのDTOクラスです。
- */
 public class UserRegistrationRequest {
     private String username;
     private String password;
     private String email;
+
+    public UserRegistrationRequest() {
+    }
 
     public UserRegistrationRequest(String username, String password, String email) {
         this.username = username;
@@ -57,6 +57,7 @@ public class UserRegistrationRequest {
     public String toString() {
         return "UserRegistrationRequest{" +
                "username='" + username + '\'' +
+               ", password='[PROTECTED]'" +
                ", email='" + email + '\'' +
                '}';
     }
