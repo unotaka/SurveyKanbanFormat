@@ -215,19 +215,23 @@ jobs:
                 }
               }')" > /dev/null
 
-          echo "=== 7. 複数ソース生成時の個別かんばんカード起票（プロパティ連動） ==="
+          echo "=== 7. 複数ソース生成時の個別かんばんカード起票（タイトル複製＋連番） ==="
           FILE_COUNT=$(wc -l < "$GENERATED_FILES_LIST")
 
           if [ "$FILE_COUNT" -gt 1 ]; then
+            seq_num=1
             while IFS= read -r f_path; do
               f_name=$(basename "$f_path")
               f_pkg=$(grep -E '^[[:space:]]*package[[:space:]]+' "$f_path" | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/' | head -n 1)
               f_class=$(grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' "$f_path" | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/' | head -n 1)
               
               f_req="※「${TASK_TITLE}」の生成処理により分割作成されたソースファイルです。\nパス: ${f_path}"
-              child_title="[分割生成] ${f_name}"
               
-              echo "個別カードを作成中（プロパティ格納）: $child_title"
+              # 元のタスク名を複製し、末尾に連番とファイル名を設定
+              # 例: 「ユーザー登録機能の作成 (1) User.java」
+              child_title="${TASK_TITLE} (${seq_num}) ${f_name}"
+              
+              echo "個別カードを作成中: $child_title"
               
               curl -s -X POST "https://api.notion.com/v1/pages" \
                 -H "Authorization: Bearer ${NOTION_TOKEN}" \
@@ -249,6 +253,9 @@ jobs:
                       "仕様・要件": { rich_text: [{ text: { content: $req } }] }
                     }
                   }')" > /dev/null
+              
+              # 連番インクリメント
+              seq_num=$((seq_num + 1))
             done < "$GENERATED_FILES_LIST"
           fi
           
