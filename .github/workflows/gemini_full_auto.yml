@@ -137,33 +137,45 @@ jobs:
           fi
 
           echo "=== 4. 複数ファイルの解析と書き出し ==="
-          echo "$JAVA_CODE" | awk '
+          GENERATED_FILES_LIST=$(mktemp)
+          
+          echo "$JAVA_CODE" | awk -v list_file="$GENERATED_FILES_LIST" '
             /^--- FILE: .* ---$/ {
               match($0, /--- FILE: (.*) ---/, arr);
               filepath = arr[1];
-              print filepath >> list_file;
-              dirpath = filepath;
-              sub(/\/[^\/]+$/, "", dirpath);
-              system("mkdir -p \"" dirpath "\"");
-              print "書き出し中: " filepath;
-              is_writing = 1;
+              
+              # filepath が空でなく、空白以外を含む場合のみ処理する
+              if (filepath != "" && filepath ~ /[^[:space:]]/) {
+                print filepath >> list_file;
+                
+                dirpath = filepath;
+                sub(/\/[^\/]+$/, "", dirpath);
+                system("mkdir -p \"" dirpath "\"");
+                
+                print "書き出し中: " filepath;
+                is_writing = 1;
+              } else {
+                is_writing = 0;
+              }
               next;
             }
             /^--- END FILE ---$/ {
               is_writing = 0;
-              close(filepath);
+              if (filepath != "") {
+                close(filepath);
+              }
               next;
             }
-            {
-              if (is_writing) {
+            { 
+              if (is_writing && filepath != "") {
                 print $0 > filepath;
-              }
+              } 
             }
           '
 
           # フォールバック処理
           if [ ! -s "$GENERATED_FILES_LIST" ]; then
-            echo "警告: 指定フォーマットでのパースに失敗したため、単一ファイルとしてフォールバック処理を行います。"
+            echo "警告: 指定フォーマットでのパースに失敗したかファイル名が空のため、単一ファイルとしてフォールバック処理を行います。"
             if [ -n "$PKG_NAME" ]; then DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"; else DIR_PATH="src/main/java"; fi
             if [ -n "$CLASS_NAME" ]; then FILE_NAME="${CLASS_NAME}.java"; else FILE_NAME="GeneratedService_$i.java"; fi
             mkdir -p "$DIR_PATH"
