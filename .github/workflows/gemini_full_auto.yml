@@ -229,7 +229,7 @@ jobs:
               
               # 元のタスク名を複製し、末尾に連番とファイル名を設定
               # 例: 「ユーザー登録機能の作成 (1) User.java」
-              child_title="${TASK_TITLE} (${seq_num}) ${f_name}"
+              child_title="${TASK_TITLE} (${seq_num}/${FILE_COUNT}) ${f_name}"
               
               echo "個別カードを作成中: $child_title"
               
