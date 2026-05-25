@@ -52,9 +52,6 @@ jobs:
             }
           }')
 
-        # デバッグ
-        echo "=== デバッグ: Notion APIからの生の応答 ===" && echo "$NOTION_RES"
-
         # 該当するすべてのタスクのインデックス数を取得
         TASK_COUNT=$(echo "$NOTION_RES" | jq '.results | length')
         
@@ -79,16 +76,28 @@ jobs:
           echo "=== 取得した仕様・要件 ==="
           echo "$REQUIREMENTS"
 
-          echo "=== 2. パッケージ名とクラス名の抽出中 ==="
-          PKG_NAME=$(echo "$REQUIREMENTS" | grep -E 'パッケージ[：:]' | sed -E 's/.*パッケージ[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
-          CLASS_NAME=$(echo "$REQUIREMENTS" | grep -E 'クラス名[：:]' | sed -E 's/.*クラス名[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
+          echo "=== 2. パッケージプロパティとクラス名プロパティの取得 ==="
+          # Notionの独立したプロパティ（パッケージ、クラス名）から値を取得
+          PKG_NAME=$(echo "$NOTION_RES" | jq -r ".results[$i].properties[\"パッケージ\"].rich_text[0].text.content // empty")
+          CLASS_NAME=$(echo "$NOTION_RES" | jq -r ".results[$i].properties[\"クラス名\"].rich_text[0].text.content // empty")
 
-          echo "抽出されたパッケージ名: $PKG_NAME"
-          echo "抽出されたクラス名: $CLASS_NAME"
+          # もしプロパティが空なら、従来の仕様・要件テキスト内からの抽出も試みる（互換性担保）
+          if [ -z "$PKG_NAME" ]; then
+            PKG_NAME=$(echo "$REQUIREMENTS" | grep -E 'パッケージ[：:]' | sed -E 's/.*パッケージ[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
+          fi
+          if [ -z "$CLASS_NAME" ]; then
+            CLASS_NAME=$(echo "$REQUIREMENTS" | grep -E 'クラス名[：:]' | sed -E 's/.*クラス名[：:][[:space:]]*([a-zA-Z0-9._]+).*/\1/' | head -n 1)
+          fi
 
-          echo "=== 3. Gemini API（無料枠）にリクエストしてJavaコードを作成中 ==="
-          PROMPT="以下の要件に基づき、Javaのソースコードを出力してください。要件を満たすために複数のクラス、インターフェース、例外、DTOなどが必要な場合は、それらをすべて出力してください。"
+          echo "使用するパッケージ名: $PKG_NAME"
+          echo "使用するクラス名: $CLASS_NAME"
+
+          echo "=== 3. Gemini APIにリクエストしてJavaコードを作成中 ==="
+          PROMPT="以下の【共通ルール】および個別要件に基づき、Javaのソースコードを出力してください。要件を満たすために複数のクラス、インターフェース、例外、DTOなどが必要な場合は、それらをすべて出力してください。"
           
+          if [ -n "$GLOBAL_RULES" ]; then
+            PROMPT="${PROMPT}\\n\\n【共通ルール（最優先遵守）】\\n$GLOBAL_RULES"
+          fi
           if [ -n "$PKG_NAME" ]; then
             PROMPT="${PROMPT}\\n- 指定デフォルトパッケージ名: $PKG_NAME"
           fi
@@ -132,11 +141,10 @@ jobs:
             /^--- FILE: .* ---$/ {
               match($0, /--- FILE: (.*) ---/, arr);
               filepath = arr[1];
-              
+              print filepath >> list_file;
               dirpath = filepath;
               sub(/\/[^\/]+$/, "", dirpath);
               system("mkdir -p \"" dirpath "\"");
-              
               print "書き出し中: " filepath;
               is_writing = 1;
               next;
@@ -154,68 +162,93 @@ jobs:
           '
 
           # フォールバック処理
-          # ※複数タスクがあるため、チェック範囲をこのタスクで想定されるフォルダに絞るか、簡易的な存在チェックにします
-          if [ -z "$PKG_NAME" ] && [ -z "$CLASS_NAME" ]; then
-             # 両方空のときだけ大雑把にチェック
-             CHECK_DIR="src/main/java"
-          else
-             CHECK_DIR="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
-          fi
-
-          if [ ! -d "$CHECK_DIR" ] || [ -z "$(find "$CHECK_DIR" -name '*.java' 2>/dev/null)" ]; then
+          if [ ! -s "$GENERATED_FILES_LIST" ]; then
             echo "警告: 指定フォーマットでのパースに失敗したため、単一ファイルとしてフォールバック処理を行います。"
-            
-            if [ -n "$PKG_NAME" ]; then
-              DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"
-            else
-              CODE_PKG=$(echo "$JAVA_CODE" | grep -E '^[[:space:]]*package[[:space:]]+' | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/' | head -n 1)
-              if [ -n "$CODE_PKG" ]; then
-                DIR_PATH="src/main/java/$(echo "$CODE_PKG" | tr '.' '/')"
-              else
-                DIR_PATH="src/main/java"
-              fi
-            fi
-
-            if [ -n "$CLASS_NAME" ]; then
-              FILE_NAME="${CLASS_NAME}.java"
-            else
-              CODE_CLASS=$(echo "$JAVA_CODE" | grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/' | head -n 1)
-              if [ -n "$CODE_CLASS" ]; then
-                FILE_NAME="${CODE_CLASS}.java"
-              else
-                FILE_NAME="GeneratedService_$i.java"
-              fi
-            fi
-
+            if [ -n "$PKG_NAME" ]; then DIR_PATH="src/main/java/$(echo "$PKG_NAME" | tr '.' '/')"; else DIR_PATH="src/main/java"; fi
+            if [ -n "$CLASS_NAME" ]; then FILE_NAME="${CLASS_NAME}.java"; else FILE_NAME="GeneratedService_$i.java"; fi
             mkdir -p "$DIR_PATH"
             echo "$JAVA_CODE" > "${DIR_PATH}/${FILE_NAME}"
-            echo "フォールバックで保存しました: ${DIR_PATH}/${FILE_NAME}"
+            echo "${DIR_PATH}/${FILE_NAME}" > "$GENERATED_FILES_LIST"
           fi
 
-          echo "=== 5. Notionのかんばんボードを『Git格納済み』に移動中 ==="
+          echo "=== 5. 未定義だった場合のパッケージ・クラス名の自動推定 ==="
+          # プロパティが空だった場合に、生成コードから自動抽出して補完するロジック
+          if [ -z "$PKG_NAME" ] || [ -z "$CLASS_NAME" ]; then
+            FIRST_FILE=$(head -n 1 "$GENERATED_FILES_LIST")
+            
+            if [ -z "$PKG_NAME" ]; then
+              PKG_NAME=$(grep -E '^[[:space:]]*package[[:space:]]+' "$FIRST_FILE" | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/' | head -n 1)
+              echo "AIコードからパッケージ名を自動抽出しました: $PKG_NAME"
+            fi
+            if [ -z "$CLASS_NAME" ]; then
+              CLASS_NAME=$(grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' "$FIRST_FILE" | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/' | head -n 1)
+              echo "AIコードからクラス名を自動抽出しました: $CLASS_NAME"
+            fi
+          fi
+
+          echo "=== 6. Notionのメインタスクを更新（各プロパティに格納） ==="
+          # ステータスを『Git格納済み』にし、パッケージとクラス名プロパティに値を保存
           curl -s -X PATCH "https://api.notion.com/v1/pages/${PAGE_ID}" \
             -H "Authorization: Bearer ${NOTION_TOKEN}" \
             -H "Notion-Version: 2022-06-28" \
             -H "Content-Type: application/json" \
-            -d '{
-              "properties": {
-                "ステータス": {
-                  "status": {
-                    "name": "Git格納済み"
-                  }
+            -d "$(jq -n \
+              --arg pkg "$PKG_NAME" \
+              --arg cls "$CLASS_NAME" \
+              '{
+                properties: {
+                  "ステータス": { status: { name: "Git格納済み" } },
+                  "パッケージ": { rich_text: [{ text: { content: $pkg } }] },
+                  "クラス名": { rich_text: [{ text: { content: $cls } }] }
                 }
-              }
-            }' > /dev/null
-          echo "Notionのステータス更新が完了しました。"
+              }')" > /dev/null
+
+          echo "=== 7. 複数ソース生成時の個別かんばんカード起票（プロパティ連動） ==="
+          FILE_COUNT=$(wc -l < "$GENERATED_FILES_LIST")
+
+          if [ "$FILE_COUNT" -gt 1 ]; then
+            while IFS= read -r f_path; do
+              f_name=$(basename "$f_path")
+              f_pkg=$(grep -E '^[[:space:]]*package[[:space:]]+' "$f_path" | sed -E 's/^[[:space:]]*package[[:space:]]+([^;[:space:]]+);.*/\1/' | head -n 1)
+              f_class=$(grep -E 'public[[:space:]]+(class|interface|enum|record)[[:space:]]+' "$f_path" | sed -E 's/.*public[[:space:]]+(class|interface|enum|record)[[:space:]]+([^{[:space:]]+).*/\2/' | head -n 1)
+              
+              f_req="※「${TASK_TITLE}」の生成処理により分割作成されたソースファイルです。\nパス: ${f_path}"
+              child_title="[分割生成] ${f_name}"
+              
+              echo "個別カードを作成中（プロパティ格納）: $child_title"
+              
+              curl -s -X POST "https://api.notion.com/v1/pages" \
+                -H "Authorization: Bearer ${NOTION_TOKEN}" \
+                -H "Notion-Version: 2022-06-28" \
+                -H "Content-Type: application/json" \
+                -d "$(jq -n \
+                  --arg db_id "${NOTION_DATABASE_ID}" \
+                  --arg title "$child_title" \
+                  --arg req "$f_req" \
+                  --arg pkg "$f_pkg" \
+                  --arg cls "$f_class" \
+                  '{
+                    parent: { database_id: $db_id },
+                    properties: {
+                      "名前": { title: [{ text: { content: $title } }] },
+                      "ステータス": { status: { name: "Git格納済み" } },
+                      "パッケージ": { rich_text: [{ text: { content: $pkg } }] },
+                      "クラス名": { rich_text: [{ text: { content: $cls } }] },
+                      "仕様・要件": { rich_text: [{ text: { content: $req } }] }
+                    }
+                  }')" > /dev/null
+            done < "$GENERATED_FILES_LIST"
+          fi
+          
+          rm -f "$GENERATED_FILES_LIST"
         done
 
-    # 3. 全てのタスク処理完了後、変更があった場合にaicreateブランチへ一括自動コミット＆プッシュを実行
+    # 3. 全てのタスク処理完了後、変更があった場合にaicreateブランチへプッシュ
     - name: Commit and Push Changes to Repository
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "Gemini-Full-Auto-Bot"
         
-        # aicreateブランチに切り替え（ローカル・リモートになければ新規作成）
         if git show-ref --verify --quiet refs/remotes/origin/aicreate; then
           git checkout aicreate
         else
@@ -224,7 +257,7 @@ jobs:
         
         if [ -n "$(git status --porcelain)" ]; then
           git add src/
-          git commit -m "feat: Notionの仕様・要件を解析してJavaコードを一括自動生成"
+          git commit -m "feat: Notionプロパティと連動してJavaソースコードを自動生成"
           git push -u origin aicreate
           echo "Gitリポジトリ（aicreateブランチ）への自動コミットおよびプッシュが完了しました！"
         else
