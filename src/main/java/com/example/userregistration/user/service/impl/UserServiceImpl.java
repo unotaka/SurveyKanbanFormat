@@ -1,36 +1,40 @@
 package com.example.userregistration.user.service.impl;
 
+import com.example.userregistration.common.exception.ApplicationException;
+import com.example.userregistration.common.exception.ErrorCode;
+import com.example.userregistration.common.exception.RepositoryException;
+import com.example.userregistration.common.exception.ValidationException;
 import com.example.userregistration.user.domain.User;
 import com.example.userregistration.user.dto.UserRegistrationRequest;
 import com.example.userregistration.user.repository.UserRepository;
 import com.example.userregistration.user.service.PasswordEncoder;
 import com.example.userregistration.user.service.UserService;
-import com.example.userregistration.common.exception.ErrorCode;
-import com.example.userregistration.common.exception.RepositoryException;
-import com.example.userregistration.common.exception.ValidationException;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
- * {@link UserService} インターフェースの具体的な実装クラスです。
- * ユーザー登録のビジネスロジックをここに記述します。
+ * {@link UserService} インターフェースの実装クラスです。
+ * ユーザー登録に関するビジネスロジックを提供します。
  */
-@Service // Spring Frameworkのサービスコンポーネントとして認識されるようにアノテーションを付与
-@Slf4j // Lombokによるロガー
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
+    // パスワードポリシーの正規表現と最小要件の定義
+    // 例: 最低8文字、大文字小文字数字記号をそれぞれ1つ以上含む。空白は不可。
+    private static final String PASSWORD_REGEX = "^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&+=])(?=\\S+$).{8,}$";
+    private static final Pattern PASSWORD_PATTERN = Pattern.compile(PASSWORD_REGEX);
+    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$";
+    private static final Pattern EMAIL_PATTERN = Pattern.compile(EMAIL_REGEX);
+
     /**
-     * UserServiceImplのコンストラクタです。
-     * 必要な依存関係（UserRepositoryとPasswordEncoder）を注入します。
+     * UserServiceImplのコンストラクタ。
+     * 必要なリポジトリとパスワードエンコーダーを依存性注入します。
      *
-     * @param userRepository ユーザーデータへのアクセスを担うリポジトリ
-     * @param passwordEncoder パスワードの暗号化と検証を担うエンコーダ
+     * @param userRepository ユーザーデータへのアクセスを提供するリポジトリ
+     * @param passwordEncoder パスワードの暗号化を行うエンコーダー
      * @throws NullPointerException userRepositoryまたはpasswordEncoderがnullの場合
      */
     public UserServiceImpl(UserRepository userRepository, PasswordEncoder passwordEncoder) {
@@ -39,90 +43,105 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
-     * 新しいユーザーを登録します。
-     *
-     * <p>このメソッドは以下の処理を行います:</p>
+     * {@inheritDoc}
+     * <p>このメソッドは以下の処理を行います。</p>
      * <ol>
-     *     <li>{@link UserRegistrationRequest}の基本的なバリデーション（DTOコンストラクタで実施済み）。</li>
-     *     <li>ユーザー名とメールアドレスの重複チェック。</li>
-     *     <li>パスワードの暗号化。</li>
-     *     <li>暗号化されたパスワードを含むユーザー情報を永続化。</li>
+     *     <li>入力DTOがnullでないことを検証します。</li>
+     *     <li>入力データの基本的なバリデーション（空文字チェック、メールアドレス形式、パスワードポリシー）を行います。</li>
+     *     <li>ユーザー名とメールアドレスの重複チェックを行います。</li>
+     *     <li>パスワードを暗号化します。</li>
+     *     <li>{@link User} ドメインオブジェクトを生成し、データベースに保存します。</li>
      * </ol>
      *
-     * @param request ユーザー登録に必要な情報を含むDTO
-     * @return 登録されたユーザーのドメインオブジェクト（IDなどが付与されたもの）
-     * @throws ValidationException ユーザー名またはメールアドレスが既に存在する場合、
-     *                             または{@link UserRegistrationRequest}のコンストラクタで捕捉しきれない業務ルール違反があった場合
-     * @throws RepositoryException データベース操作中にシステムエラーが発生した場合
-     * @throws NullPointerException requestがnullの場合
+     * @param request ユーザー登録情報を含むDTO
+     * @return 登録されたユーザーのドメインオブジェクト
+     * @throws IllegalArgumentException requestがnullの場合
+     * @throws ValidationException ユーザー名、メールアドレスの重複、パスワードポリシー違反、またはその他の入力値不正が発生した場合
+     * @throws ApplicationException システムエラー（例: パスワード暗号化失敗、データベース操作失敗）が発生した場合
      */
     @Override
-    public User registerUser(UserRegistrationRequest request) throws ValidationException, RepositoryException {
+    public User registerUser(UserRegistrationRequest request) {
         Objects.requireNonNull(request, "UserRegistrationRequest must not be null.");
-        log.info("Attempting to register user with username: {}", request.username());
 
-        // 1. 重複チェック
-        validateUserUniqueness(request);
+        // 1. 入力データのバリデーション
+        validateRegistrationRequest(request);
 
-        // 2. パスワード暗号化
+        // 2. ユーザー名、メールアドレスの重複チェック
+        checkDuplicateUser(request.username(), request.email());
+
+        // 3. パスワードの暗号化
         String hashedPassword;
         try {
             hashedPassword = passwordEncoder.encode(request.password());
-            log.debug("Password successfully encrypted for user: {}", request.username());
-        } catch (RepositoryException e) {
-            log.error("Failed to encrypt password for user: {}", request.username(), e);
-            // passwordEncoderがRepositoryExceptionをスローする場合、それをそのままスローする
+        } catch (ApplicationException e) {
+            // PasswordEncoderが内部でApplicationExceptionをスローした場合、そのまま再スロー
             throw e;
         } catch (Exception e) {
-            log.error("An unexpected error occurred during password encryption for user: {}", request.username(), e);
-            throw new RepositoryException(ErrorCode.PASSWORD_ENCRYPTION_ERROR, "パスワードの暗号化中に予期せぬエラーが発生しました。", e);
+            // 予期せぬパスワードエンコードエラーはシステムエラーとして扱う
+            throw new ApplicationException(ErrorCode.PASSWORD_ENCRYPTION_ERROR,
+                                           new StringBuilder("Failed to encode password for user: ").append(request.username()).toString(),
+                                           e);
         }
 
-        // 3. ユーザーオブジェクトの構築
-        User newUser = User.builder()
-                .username(request.username())
-                .email(request.email())
-                .hashedPassword(hashedPassword)
-                // createdAtとupdatedAtはUserRepositoryのsaveメソッドで設定されることを想定
-                // もしService層で設定が必要な場合はここでLocalDateTime.now()を設定
-                .build();
-        log.debug("User domain object created for registration.");
+        // 4. Userドメインオブジェクトの生成
+        User newUser = new User(request.username(), request.email(), hashedPassword);
 
-        // 4. ユーザー情報の永続化
+        // 5. データベースへの永続化
         try {
-            User savedUser = userRepository.save(newUser);
-            log.info("User registered successfully with ID: {}", savedUser.getId());
-            return savedUser;
+            return userRepository.save(newUser);
         } catch (RepositoryException e) {
-            log.error("Failed to save user {} to repository.", request.username(), e);
-            throw e; // UserRepositoryからスローされたRepositoryExceptionをそのままスロー
+            // RepositoryException は既に ApplicationException を継承しているので、そのまま再スロー
+            throw e;
         } catch (Exception e) {
-            log.error("An unexpected error occurred during user persistence for user: {}", request.username(), e);
-            throw new RepositoryException(ErrorCode.DATABASE_OPERATION_ERROR, "ユーザー情報の永続化中に予期せぬエラーが発生しました。", e);
+            // データベース操作中の予期せぬエラーはリポジトリ例外としてラップする
+            throw new RepositoryException(ErrorCode.DATABASE_OPERATION_ERROR,
+                                          new StringBuilder("Failed to save user ").append(newUser.getUsername()).append(" to database.").toString(),
+                                          e);
+        }
+    }
+
+    /**
+     * ユーザー登録リクエストの各フィールドをバリデートします。
+     *
+     * @param request バリデート対象のユーザー登録リクエストDTO
+     * @throws ValidationException 入力値が不正な場合
+     */
+    private void validateRegistrationRequest(UserRegistrationRequest request) {
+        // 空文字チェック
+        if (request.username().isBlank()) {
+            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "ユーザー名は必須です。");
+        }
+        if (request.email().isBlank()) {
+            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "メールアドレスは必須です。");
+        }
+        if (request.password().isBlank()) {
+            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "パスワードは必須です。");
+        }
+
+        // メールアドレス形式チェック
+        if (!EMAIL_PATTERN.matcher(request.email()).matches()) {
+            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "メールアドレスの形式が不正です。");
+        }
+
+        // パスワードポリシーチェック
+        if (!PASSWORD_PATTERN.matcher(request.password()).matches()) {
+            throw new ValidationException(ErrorCode.PASSWORD_POLICY_VIOLATION, ErrorCode.PASSWORD_POLICY_VIOLATION.getMessage());
         }
     }
 
     /**
      * ユーザー名とメールアドレスの重複をチェックします。
      *
-     * @param request ユーザー登録リクエストDTO
-     * @throws ValidationException ユーザー名またはメールアドレスが既に存在する場合
-     * @throws RepositoryException データベース操作中にシステムエラーが発生した場合
+     * @param username チェック対象のユーザー名
+     * @param email チェック対象のメールアドレス
+     * @throws ValidationException ユーザー名またはメールアドレスが既に登録されている場合
      */
-    private void validateUserUniqueness(UserRegistrationRequest request) throws ValidationException, RepositoryException {
-        // ユーザー名重複チェック
-        if (userRepository.existsByUsername(request.username())) {
-            log.warn("User registration failed: Username '{}' already exists.", request.username());
-            throw new ValidationException(ErrorCode.USERNAME_ALREADY_EXISTS,
-                    "指定されたユーザー名 (" + request.username() + ") は既に登録されています。");
+    private void checkDuplicateUser(String username, String email) {
+        if (userRepository.findByUsername(username).isPresent()) {
+            throw new ValidationException(ErrorCode.USERNAME_ALREADY_EXISTS, ErrorCode.USERNAME_ALREADY_EXISTS.getMessage());
         }
-
-        // メールアドレス重複チェック
-        if (userRepository.existsByEmail(request.email())) {
-            log.warn("User registration failed: Email '{}' already exists.", request.email());
-            throw new ValidationException(ErrorCode.EMAIL_ALREADY_EXISTS,
-                    "指定されたメールアドレス (" + request.email() + ") は既に登録されています。");
+        if (userRepository.findByEmail(email).isPresent()) {
+            throw new ValidationException(ErrorCode.EMAIL_ALREADY_EXISTS, ErrorCode.EMAIL_ALREADY_EXISTS.getMessage());
         }
-        log.debug("Username and email uniqueness check passed.");
     }
 }

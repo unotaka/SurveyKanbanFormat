@@ -1,101 +1,175 @@
 package com.example.userregistration.user.domain;
 
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
-
-import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
- * ユーザー情報を表すドメインエンティティです。
- * データベースに永続化されるユーザーの具体的なデータを保持します。
- * Lombokを使用し、ボイラープレートコードを削減しています。
+ * ユーザーエンティティ。
+ * ユーザーのID、ユーザー名、メールアドレス、暗号化されたパスワードを保持します。
+ * ドメインロジックや状態変更可能性を考慮し、標準のJavaクラスとして実装されています。
  */
-@Getter
-@Setter
-@ToString
-@Builder
-@NoArgsConstructor // デフォルトコンストラクタ（Lombokで生成）
-@AllArgsConstructor // 全フィールドを引数とするコンストラクタ（Lombokで生成）
 public class User {
 
-    /**
-     * ユーザーの一意な識別子（主キー）。
-     */
-    private Long id;
-
-    /**
-     * ユーザー名。
-     */
+    private final String userId;
     private String username;
-
-    /**
-     * メールアドレス。
-     */
     private String email;
-
-    /**
-     * ハッシュ化されたパスワード。
-     */
     private String hashedPassword;
 
     /**
-     * アカウント作成日時。
-     */
-    private LocalDateTime createdAt;
-
-    /**
-     * アカウント最終更新日時。
-     */
-    private LocalDateTime updatedAt;
-
-    /**
-     * Userオブジェクトを構築します。
-     * このコンストラクタは主にLombokの{@code @Builder}アノテーションが使用される場合に便利ですが、
-     * 直接呼び出すことも可能です。
+     * ユーザーエンティティの新しいインスタンスを生成します。
+     * IDはUUIDで自動生成されます。
      *
-     * @param id ユーザーID
      * @param username ユーザー名
      * @param email メールアドレス
-     * @param hashedPassword ハッシュ化されたパスワード
-     * @param createdAt 作成日時
-     * @param updatedAt 更新日時
+     * @param hashedPassword 暗号化されたパスワード
+     * @throws IllegalArgumentException username, email, またはhashedPasswordがnullまたは空の場合
      */
-    // JavadocはLombokで生成されるコンストラクタに対しては不要ですが、
-    // 明示的な記述を求める共通ルールに従い、@AllArgsConstructorに対応する形で記述しています。
-    // @NoArgsConstructorについても同様にJavacDocを省略しています。
-    // 実運用ではLombok利用を前提とするため、これらの手書きJavadocは通常は不要です。
-    // CHECKSTYLE:OFF
-    // PMD:OFF
-    // (Lombokの生成するメソッドに対する警告を抑制するコメント)
-    // CHECKSTYLE:ON
-    // PMD:ON
+    public User(String username, String email, String hashedPassword) {
+        this(UUID.randomUUID().toString(), username, email, hashedPassword);
+    }
 
     /**
-     * {@inheritDoc}
+     * ユーザーエンティティの新しいインスタンスを生成します。
+     *
+     * @param userId ユーザーの一意なID
+     * @param username ユーザー名
+     * @param email メールアドレス
+     * @param hashedPassword 暗号化されたパスワード
+     * @throws IllegalArgumentException userId, username, email, またはhashedPasswordがnullまたは空の場合
+     */
+    public User(String userId, String username, String email, String hashedPassword) {
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("User ID must not be null or blank.");
+        }
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username must not be null or blank.");
+        }
+        if (email == null || email.isBlank()) {
+            throw new IllegalArgumentException("Email must not be null or blank.");
+        }
+        if (hashedPassword == null || hashedPassword.isBlank()) {
+            throw new IllegalArgumentException("Hashed password must not be null or blank.");
+        }
+
+        this.userId = userId;
+        this.username = username;
+        this.email = email;
+        this.hashedPassword = hashedPassword;
+    }
+
+    /**
+     * ユーザーIDを取得します。
+     *
+     * @return ユーザーID
+     */
+    public String getUserId() {
+        return userId;
+    }
+
+    /**
+     * ユーザー名を取得します。
+     *
+     * @return ユーザー名
+     */
+    public String getUsername() {
+        return username;
+    }
+
+    /**
+     * ユーザー名を設定します。
+     *
+     * @param username 新しいユーザー名
+     * @throws IllegalArgumentException usernameがnullまたは空の場合
+     */
+    public void setUsername(String username) {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username must not be null or blank.");
+        }
+        this.username = username;
+    }
+
+    /**
+     * メールアドレスを取得します。
+     *
+     * @return メールアドレス
+     */
+    public String getEmail() {
+        return email;
+    }
+
+    /**
+     * メールアドレスを設定します。
+     *
+     * @param email 新しいメールアドレス
+     * @throws IllegalArgumentException emailがnullまたは空の場合
+     */
+    public void setEmail(String email) {
+        if (email == null || email.isBlank()) {
+            throw new IllegalArgumentException("Email must not be null or blank.");
+        }
+        this.email = email;
+    }
+
+    /**
+     * 暗号化されたパスワードを取得します。
+     *
+     * @return 暗号化されたパスワード
+     */
+    public String getHashedPassword() {
+        return hashedPassword;
+    }
+
+    /**
+     * 暗号化されたパスワードを設定します。
+     *
+     * @param hashedPassword 新しい暗号化されたパスワード
+     * @throws IllegalArgumentException hashedPasswordがnullまたは空の場合
+     */
+    public void setHashedPassword(String hashedPassword) {
+        if (hashedPassword == null || hashedPassword.isBlank()) {
+            throw new IllegalArgumentException("Hashed password must not be null or blank.");
+        }
+        this.hashedPassword = hashedPassword;
+    }
+
+    /**
+     * このオブジェクトと指定されたオブジェクトが等しいかどうかを比較します。
+     * ユーザーIDに基づいて比較を行います。
      *
      * @param o 比較対象のオブジェクト
-     * @return オブジェクトが等しい場合はtrue、そうでない場合はfalse
+     * @return 指定されたオブジェクトがこのオブジェクトと等しい場合は{@code true}、そうでない場合は{@code false}
      */
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         User user = (User) o;
-        return Objects.equals(id, user.id);
+        return Objects.equals(userId, user.userId);
     }
 
     /**
-     * {@inheritDoc}
+     * このオブジェクトのハッシュコード値を返します。
+     * ユーザーIDに基づいてハッシュコードを生成します。
      *
-     * @return このオブジェクトのハッシュコード
+     * @return このオブジェクトのハッシュコード値
      */
     @Override
     public int hashCode() {
-        return Objects.hash(id);
+        return Objects.hash(userId);
+    }
+
+    /**
+     * このオブジェクトの文字列表現を返します。
+     *
+     * @return このオブジェクトの文字列表現
+     */
+    @Override
+    public String toString() {
+        return new StringBuilder("User{")
+                .append("userId='").append(userId).append('\'')
+                .append(", username='").append(username).append('\'')
+                .append(", email='").append(email).append('\'')
+                .append('}')
+                .toString();
     }
 }
