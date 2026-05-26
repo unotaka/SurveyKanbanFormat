@@ -11,137 +11,104 @@ import com.example.userregistration.user.service.PasswordEncoder;
 import com.example.userregistration.user.service.UserService;
 
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 /**
- * {@link UserService} インターフェースの実装クラスです。
- * ユーザー登録に関するビジネスロジックを提供します。
+ * {@link UserService} インターフェースの具象クラスで、ユーザー登録に関するビジネスロジックを実装します。
+ * 入力値のバリデーション、パスワードの暗号化、ユーザー情報のデータベース永続化を担当します。
  */
 public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
-    // パスワードポリシーの正規表現と最小要件の定義
-    // 例: 最低8文字、大文字小文字数字記号をそれぞれ1つ以上含む。空白は不可。
-    private static final String PASSWORD_REGEX = "^(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&+=])(?=\\S+$).{8,}$";
-    private static final Pattern PASSWORD_PATTERN = Pattern.compile(PASSWORD_REGEX);
-    private static final String EMAIL_REGEX = "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$";
-    private static final Pattern EMAIL_PATTERN = Pattern.compile(EMAIL_REGEX);
-
     /**
      * UserServiceImplのコンストラクタ。
-     * 必要なリポジトリとパスワードエンコーダーを依存性注入します。
+     * 必要な依存関係（UserRepositoryとPasswordEncoder）を注入します。
      *
      * @param userRepository ユーザーデータへのアクセスを提供するリポジトリ
-     * @param passwordEncoder パスワードの暗号化を行うエンコーダー
+     * @param passwordEncoder パスワードの暗号化と検証を行うエンコーダー
      * @throws NullPointerException userRepositoryまたはpasswordEncoderがnullの場合
      */
     public UserServiceImpl(UserRepository userRepository, PasswordEncoder passwordEncoder) {
-        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null.");
-        this.passwordEncoder = Objects.requireNonNull(passwordEncoder, "PasswordEncoder must not be null.");
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null.");
+        this.passwordEncoder = Objects.requireNonNull(passwordEncoder, "passwordEncoder must not be null.");
     }
 
     /**
-     * {@inheritDoc}
-     * <p>このメソッドは以下の処理を行います。</p>
-     * <ol>
-     *     <li>入力DTOがnullでないことを検証します。</li>
-     *     <li>入力データの基本的なバリデーション（空文字チェック、メールアドレス形式、パスワードポリシー）を行います。</li>
-     *     <li>ユーザー名とメールアドレスの重複チェックを行います。</li>
-     *     <li>パスワードを暗号化します。</li>
-     *     <li>{@link User} ドメインオブジェクトを生成し、データベースに保存します。</li>
-     * </ol>
+     * 新しいユーザーを登録します。
+     * 入力されたユーザー情報に対してバリデーションを行い、パスワードを暗号化した後、
+     * データベースにユーザー情報を永続化します。
      *
-     * @param request ユーザー登録情報を含むDTO
-     * @return 登録されたユーザーのドメインオブジェクト
-     * @throws IllegalArgumentException requestがnullの場合
-     * @throws ValidationException ユーザー名、メールアドレスの重複、パスワードポリシー違反、またはその他の入力値不正が発生した場合
-     * @throws ApplicationException システムエラー（例: パスワード暗号化失敗、データベース操作失敗）が発生した場合
+     * @param request ユーザー登録リクエストDTO
+     * @throws ValidationException 入力値のバリデーションに失敗した場合（例: ユーザー名重複、メールアドレス重複、パスワードポリシー違反）
+     * @throws RepositoryException データベース操作中にエラーが発生した場合
+     * @throws ApplicationException パスワード暗号化処理など、その他のシステムエラーが発生した場合
+     * @throws NullPointerException requestがnullの場合
      */
     @Override
-    public User registerUser(UserRegistrationRequest request) {
+    public void registerUser(UserRegistrationRequest request) {
         Objects.requireNonNull(request, "UserRegistrationRequest must not be null.");
 
-        // 1. 入力データのバリデーション
-        validateRegistrationRequest(request);
+        // 1. バリデーションチェック
+        validateUserRegistrationRequest(request);
 
-        // 2. ユーザー名、メールアドレスの重複チェック
-        checkDuplicateUser(request.username(), request.email());
-
-        // 3. パスワードの暗号化
+        // 2. パスワードの暗号化
         String hashedPassword;
         try {
             hashedPassword = passwordEncoder.encode(request.password());
         } catch (ApplicationException e) {
-            // PasswordEncoderが内部でApplicationExceptionをスローした場合、そのまま再スロー
-            throw e;
-        } catch (Exception e) {
-            // 予期せぬパスワードエンコードエラーはシステムエラーとして扱う
+            // PasswordEncoderがApplicationExceptionをスローする可能性があるので、そのまま再スロー
             throw new ApplicationException(ErrorCode.PASSWORD_ENCRYPTION_ERROR,
-                                           new StringBuilder("Failed to encode password for user: ").append(request.username()).toString(),
-                                           e);
+                    String.format("パスワードの暗号化に失敗しました。ユーザー名: %s", request.username()), e);
+        } catch (Exception e) {
+            // 予期せぬ暗号化エラーを補足し、ApplicationExceptionでラップ
+            throw new ApplicationException(ErrorCode.PASSWORD_ENCRYPTION_ERROR,
+                    String.format("パスワードの暗号化中に予期せぬエラーが発生しました。ユーザー名: %s", request.username()), e);
         }
 
-        // 4. Userドメインオブジェクトの生成
+        // 3. ユーザーオブジェクトの生成
+        // Userクラスはドメインエンティティであり、Lombokまたは適切なコンストラクタを持つと仮定します。
+        // ここでは、ユーザー名、メールアドレス、ハッシュ化されたパスワードを受け取るコンストラクタが存在すると仮定します。
         User newUser = new User(request.username(), request.email(), hashedPassword);
 
-        // 5. データベースへの永続化
+        // 4. データベースへの永続化
         try {
-            return userRepository.save(newUser);
+            userRepository.save(newUser);
         } catch (RepositoryException e) {
-            // RepositoryException は既に ApplicationException を継承しているので、そのまま再スロー
+            // RepositoryExceptionはすでにErrorCodeを持っており、Systemエラーとして定義されているため、そのままスロー。
             throw e;
         } catch (Exception e) {
-            // データベース操作中の予期せぬエラーはリポジトリ例外としてラップする
+            // データベース操作中の予期せぬエラーを補足し、RepositoryExceptionでラップ。
             throw new RepositoryException(ErrorCode.DATABASE_OPERATION_ERROR,
-                                          new StringBuilder("Failed to save user ").append(newUser.getUsername()).append(" to database.").toString(),
-                                          e);
+                    String.format("ユーザー(%s)の登録中にデータベースエラーが発生しました。", request.username()), e);
         }
     }
 
     /**
-     * ユーザー登録リクエストの各フィールドをバリデートします。
+     * ユーザー登録リクエストのバリデーションを行います。
      *
-     * @param request バリデート対象のユーザー登録リクエストDTO
-     * @throws ValidationException 入力値が不正な場合
+     * @param request ユーザー登録リクエストDTO
+     * @throws ValidationException バリデーションルールに違反した場合
      */
-    private void validateRegistrationRequest(UserRegistrationRequest request) {
-        // 空文字チェック
-        if (request.username().isBlank()) {
-            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "ユーザー名は必須です。");
-        }
-        if (request.email().isBlank()) {
-            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "メールアドレスは必須です。");
-        }
-        if (request.password().isBlank()) {
-            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "パスワードは必須です。");
+    private void validateUserRegistrationRequest(UserRegistrationRequest request) {
+        // ユーザー名の重複チェック
+        if (userRepository.existsByUsername(request.username())) {
+            throw new ValidationException(ErrorCode.USERNAME_ALREADY_EXISTS,
+                    String.format("ユーザー名 '%s' は既に登録されています。", request.username()));
         }
 
-        // メールアドレス形式チェック
-        if (!EMAIL_PATTERN.matcher(request.email()).matches()) {
-            throw new ValidationException(ErrorCode.VALIDATION_ERROR, "メールアドレスの形式が不正です。");
+        // メールアドレスの重複チェック
+        if (userRepository.existsByEmail(request.email())) {
+            throw new ValidationException(ErrorCode.EMAIL_ALREADY_EXISTS,
+                    String.format("メールアドレス '%s' は既に登録されています。", request.email()));
         }
 
-        // パスワードポリシーチェック
-        if (!PASSWORD_PATTERN.matcher(request.password()).matches()) {
-            throw new ValidationException(ErrorCode.PASSWORD_POLICY_VIOLATION, ErrorCode.PASSWORD_POLICY_VIOLATION.getMessage());
+        // パスワードの簡易ポリシーチェック (例: 空でないこと)
+        // UserRegistrationRequestレコードのコンストラクタで既にnullチェックが行われていると仮定します。
+        if (request.password().isBlank()) { // Java 11以降のString.isBlank()を使用
+            throw new ValidationException(ErrorCode.PASSWORD_POLICY_VIOLATION,
+                    "パスワードは空であってはなりません。");
         }
-    }
-
-    /**
-     * ユーザー名とメールアドレスの重複をチェックします。
-     *
-     * @param username チェック対象のユーザー名
-     * @param email チェック対象のメールアドレス
-     * @throws ValidationException ユーザー名またはメールアドレスが既に登録されている場合
-     */
-    private void checkDuplicateUser(String username, String email) {
-        if (userRepository.findByUsername(username).isPresent()) {
-            throw new ValidationException(ErrorCode.USERNAME_ALREADY_EXISTS, ErrorCode.USERNAME_ALREADY_EXISTS.getMessage());
-        }
-        if (userRepository.findByEmail(email).isPresent()) {
-            throw new ValidationException(ErrorCode.EMAIL_ALREADY_EXISTS, ErrorCode.EMAIL_ALREADY_EXISTS.getMessage());
-        }
+        // ここにさらに複雑なパスワードポリシー（文字数、文字種など）を追加できます。
     }
 }

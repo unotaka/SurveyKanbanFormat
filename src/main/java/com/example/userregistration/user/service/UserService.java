@@ -1,26 +1,25 @@
 package com.example.userregistration.user.service;
 
-import com.example.userregistration.user.dto.UserRegistrationRequest;
-import com.example.userregistration.user.domain.User;
-import com.example.userregistration.common.exception.ValidationException;
 import com.example.userregistration.common.exception.ApplicationException;
+import com.example.userregistration.common.exception.RepositoryException;
+import com.example.userregistration.common.exception.ValidationException;
+import com.example.userregistration.user.dto.UserRegistrationRequest;
 
 /**
  * ユーザー関連のビジネスロジックを定義するサービスインターフェースです。
- * 特にユーザー登録処理を担当します。
  */
 public interface UserService {
 
     /**
      * 新しいユーザーを登録します。
-     * 入力データのバリデーション、ユーザー名・メールアドレスの重複チェック、
-     * パスワードの暗号化、およびデータベースへの永続化を行います。
+     * 入力されたユーザー情報に対してバリデーションを行い、パスワードを暗号化した後、
+     * データベースにユーザー情報を永続化します。
      *
-     * @param request ユーザー登録情報を含むDTO
-     * @return 登録されたユーザーのドメインオブジェクト
-     * @throws IllegalArgumentException requestがnullの場合
-     * @throws ValidationException ユーザー名、メールアドレスの重複、パスワードポリシー違反、またはその他の入力値不正が発生した場合
-     * @throws ApplicationException システムエラー（例: パスワード暗号化失敗、データベース操作失敗）が発生した場合
+     * @param request ユーザー登録リクエストDTO
+     * @throws ValidationException 入力値のバリデーションに失敗した場合（例: ユーザー名重複、メールアドレス重複、パスワードポリシー違反）
+     * @throws RepositoryException データベース操作中にエラーが発生した場合
+     * @throws ApplicationException パスワード暗号化処理など、その他のシステムエラーが発生した場合
+     * @throws NullPointerException requestがnullの場合
      */
-    User registerUser(UserRegistrationRequest request);
+    void registerUser(UserRegistrationRequest request);
 }
