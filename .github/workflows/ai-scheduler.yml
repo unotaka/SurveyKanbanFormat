@@ -33,11 +33,15 @@ jobs:
       - name: Install Dependencies
         run: |
           npm install -g pnpm
-          # package.json が存在する場合のみ pnpm install を実行する
+          
+          # 💡 package.json の有無に関わらず、AIの実行に必要なライブラリを直接インストール
+          npm install @google/genai
+          
+          # もし既存の package.json がある場合は、他の依存関係も通常通りインストール
           if [ -f "package.json" ]; then
             pnpm install
           else
-            echo "🎵 package.json が見つからないため、インストールをスキップします（初回生成時など）"
+            echo "🎵 package.json が直下にないため、個別インストールのみで進行します"
           fi
 
       # 4. Notionに「Claude生成待ち」のタスクがないかポーリング（チェック）
