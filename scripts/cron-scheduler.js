@@ -3,18 +3,18 @@ import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 
 // 環境変数から必要な各種キーやIDを読み込み
-const NOTION_API_KEY = process.env.NOTION_API_KEY;
-const DATABASE_ID = process.env.NOTION_DATABASE_ID;
+const NOTION_TOKEN = process.env.NOTION_TOKEN;
+const NOTION_DATABASE_ID = process.env.NOTION_NOTION_DATABASE_ID;
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 async function checkNotionAndDevelop() {
   console.log("🔍 Notionのデータベースをスキャン中...");
 
   // 1. Notionから「Claude生成待ち」のタスクを1件だけ検索
-  const response = await fetch(`https://api.notion.com/v1/databases/${DATABASE_ID}/query`, {
+  const response = await fetch(`https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${NOTION_API_KEY}`,
+      "Authorization": `Bearer ${NOTION_TOKEN}`,
       "Notion-Version": "2022-06-28",
       "Content-Type": "application/json"
     },
