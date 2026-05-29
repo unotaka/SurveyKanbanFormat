@@ -70,7 +70,7 @@ async function checkNotionAndDevelop() {
   // 2. 該当タスクから必要な情報を抽出
   const task = data.results[0];
   const pageId = task.id;
-  const instruction = task.properties["仕様"]?.rich_text[0]?.plain_text || "";
+  const instruction = task.properties["仕様・要件"]?.rich_text[0]?.plain_text || "";
 
   // Notionの公式「ID」プロパティから、自動採番された接頭辞と数値を結合して取得
   // 例: 接頭辞が "TASK"、番号が 45 の場合 ➔ "TASK-45" になります
