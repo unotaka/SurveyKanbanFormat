@@ -7,10 +7,19 @@ import path from "path";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 async function generateCode() {
-  // NotionのWebhookから渡された指示を環境変数経由で取得
-  const prompt = process.env.NOTION_INSTRUCTION; 
+  // --- 💡 修正：環境変数ではなく、JSONファイルから指示を安全に読み込む ---
+  let prompt = "";
+  try {
+    const fileContent = fs.readFileSync("task_info.json", "utf8");
+    const taskData = JSON.parse(fileContent);
+    prompt = taskData.INSTRUCTION;
+  } catch (error) {
+    console.error("❌ エラー: task_info.json の読み込みに失敗したか、ファイルが存在しません。");
+    process.exit(1);
+  }
+
   if (!prompt) {
-    console.error("エラー: Notionからの指示(NOTION_INSTRUCTION)が空です。");
+    console.error("エラー: Notionからの指示(INSTRUCTION)が空です。");
     process.exit(1);
   }
 

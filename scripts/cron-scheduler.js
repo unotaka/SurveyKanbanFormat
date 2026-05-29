@@ -87,28 +87,21 @@ async function checkNotionAndDevelop() {
   console.log(`🎯 対象タスクを発見しました: ${taskId}`);
   console.log(`📝 指示文の内容: ${instruction.substring(0, 30)}...`);
 
-  // 3. GitHub Actionsの環境変数に直接格納（複数行の改行にも対応する形式）
+  // --- 💡 修正：環境変数ではなく、確実なJSONファイルとして保存する ---
+  const taskData = {
+    TASK_ID: taskId,
+    PAGE_ID: pageId,
+    INSTRUCTION: instruction
+  };
+  
+  // JSONファイルとして保存（改行や特殊文字も安全に保持されます）
+  fs.writeFileSync("task_info.json", JSON.stringify(taskData, null, 2), "utf8");
+  console.log("💾 task_info.json にタスク情報を安全に格納しました。");
+  
+  // 後続のステップが「タスクの有無」を判定できるように、TASK_ID だけ $GITHUB_ENV に入れる
   if (process.env.GITHUB_ENV) {
-    // 変数ごとにしっかり改行を挟み、ヒアドキュメントの「=」と「改行」を正確に設定します
-    const githubEnvContent = [
-      `TASK_ID=${taskId}`,
-      `PAGE_ID=${pageId}`,
-      `INSTRUCTION<<EOF`,
-      instruction,
-      `EOF`,
-      "" // 最後に末尾の改行を確保
-    ].join("\n");
-
-    fs.appendFileSync(process.env.GITHUB_ENV, githubEnvContent);
-    console.log("🚀 GitHub Actions の環境変数にタスク情報を直接格納しました。");
-  } else {
-    // ローカル開発環境での検証用（一応ファイルにも残す）
-    const envContent = `TASK_ID=${taskId}\nPAGE_ID=${pageId}\nINSTRUCTION=${instruction}`;
-    fs.writeFileSync("task_info.env", envContent);
-    console.log("備忘: ローカル環境のため task_info.env に格納しました。");
+    fs.appendFileSync(process.env.GITHUB_ENV, `TASK_ID=${taskId}\n`);
   }
-
-  console.log("💾 task_info.env にタスク情報を格納しました。自動生成フェーズに進みます。");
 }
 
 checkNotionAndDevelop().catch((error) => {

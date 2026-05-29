@@ -48,14 +48,11 @@ jobs:
       - name: Check Notion Database
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          # 💡 前回のログで「NOTION_DATABASE_ID」となっていたため、
-          # スクリプトの process.env.NOTION_DATABASE_ID に合わせてキー名を変更しています
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node scripts/cron-scheduler.js
 
       # 5. 【条件分岐】タスクがある場合のみ、専用のGitブランチを作成
-      # 💡 判定を「ファイル存在チェック」から「環境変数 TASK_ID が空でないか」に変更
       - name: Create Feature Branch
         if: env.TASK_ID != ''
         run: |
@@ -64,7 +61,6 @@ jobs:
           git config --global user.email "gemini-bot@yourdomain.local"
           
           # 新しい開発用ブランチを作成して切り替え
-          # 💡 $TASK_ID は自動で引き継がれているため、そのまま使えます
           git checkout -b feature/$TASK_ID
 
       # 6. 【条件分岐】Geminiによるソースコード・テストコードの自動生成
@@ -72,9 +68,8 @@ jobs:
         if: env.TASK_ID != ''
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # 💡 $INSTRUCTION には改行込みの文章が安全に入っています
-          NOTION_INSTRUCTION: ${{ env.INSTRUCTION }}
         run: |
+          # 💡 環境変数ではなく、直前のステップが生成した task_info.json を直接読み込ませます
           node scripts/gemini-coder.js
 
       # 7. 【条件分岐】自動テストの実行 ＆ エラー時の自律修正ループ（最大3回リトライ）
@@ -135,6 +130,9 @@ jobs:
       - name: Update Notion Status to Git Stored
         if: env.TASK_ID != ''
         run: |
+          # 💡 JSONファイルから PAGE_ID をノードのワンライナーで安全に抽出
+          PAGE_ID=$(node -e "console.log(require('./task_info.json').PAGE_ID)")
+          
           echo "📝 Notionのタスク（ページID: $PAGE_ID）を『Git格納済み』に更新中..."
           
           curl -X PATCH "https://api.notion.com/v1/pages/$PAGE_ID" \
@@ -150,6 +148,5 @@ jobs:
                 }
               }
             }'
-          # 💡 上記の "Status" だった部分を、cron-scheduler.jsに合わせて "ステータス" に修正しました
           
           echo "🎉 すべての自動化プロセスが正常に完了しました！"
