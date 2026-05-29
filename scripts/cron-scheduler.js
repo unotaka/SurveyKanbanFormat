@@ -87,10 +87,19 @@ async function checkNotionAndDevelop() {
   console.log(`🎯 対象タスクを発見しました: ${taskId}`);
   console.log(`📝 指示文の内容: ${instruction.substring(0, 30)}...`);
 
-  // 3. 後続のGitHub Actions（ai-scheduler.yml）へ引き渡すために環境変数ファイルに保存
-  const envContent = `TASK_ID=${taskId}\nPAGE_ID=${pageId}\nINSTRUCTION=${instruction}`;
-  fs.writeFileSync("task_info.env", envContent);
-  
+  // 3. GitHub Actionsの環境変数に直接格納（複数行の改行にも対応する形式）
+  if (process.env.GITHUB_ENV) {
+    // GitHub Actions上での実行時
+    const githubEnvContent = `TASK_ID=${taskId}\nPAGE_ID=${pageId}\nINSTRUCTION<<EOF\n${instruction}\nEOF\n`;
+    fs.appendFileSync(process.env.GITHUB_ENV, githubEnvContent);
+    console.log("🚀 GitHub Actions の環境変数にタスク情報を直接格納しました。");
+  } else {
+    // ローカル開発環境での検証用（一応ファイルにも残す）
+    const envContent = `TASK_ID=${taskId}\nPAGE_ID=${pageId}\nINSTRUCTION=${instruction}`;
+    fs.writeFileSync("task_info.env", envContent);
+    console.log("備忘: ローカル環境のため task_info.env に格納しました。");
+  }
+
   console.log("💾 task_info.env にタスク情報を格納しました。自動生成フェーズに進みます。");
 }
 

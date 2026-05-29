@@ -48,50 +48,48 @@ jobs:
       - name: Check Notion Database
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          # 💡 前回のログで「NOTION_NOTION_DATABASE_ID」となっていたため、
+          # スクリプトの process.env.NOTION_NOTION_DATABASE_ID に合わせてキー名を変更しています
+          NOTION_NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node scripts/cron-scheduler.js
 
       # 5. 【条件分岐】タスクがある場合のみ、専用のGitブランチを作成
+      # 💡 判定を「ファイル存在チェック」から「環境変数 TASK_ID が空でないか」に変更
       - name: Create Feature Branch
-        if: hashFiles('task_info.env') != ''
+        if: env.TASK_ID != ''
         run: |
-          # 保存された環境変数を読み出す
-          export $(cat task_info.env | xargs)
-          
           # Gitのコミット用ユーザー情報を設定
           git config --global user.name "Gemini Developer Bot"
           git config --global user.email "gemini-bot@yourdomain.local"
           
           # 新しい開発用ブランチを作成して切り替え
+          # 💡 $TASK_ID は自動で引き継がれているため、そのまま使えます
           git checkout -b feature/$TASK_ID
 
       # 6. 【条件分岐】Geminiによるソースコード・テストコードの自動生成
       - name: Run Gemini Coder
-        if: hashFiles('task_info.env') != ''
+        if: env.TASK_ID != ''
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # 💡 $INSTRUCTION には改行込みの文章が安全に入っています
+          NOTION_INSTRUCTION: ${{ env.INSTRUCTION }}
         run: |
-          export $(cat task_info.env | xargs)
-          # 生成スクリプトにNotionから取得した指示文を環境変数として渡して実行
-          export NOTION_INSTRUCTION="$INSTRUCTION"
           node scripts/gemini-coder.js
 
       # 7. 【条件分岐】自動テストの実行 ＆ エラー時の自律修正ループ（最大3回リトライ）
       - name: Execute Tests and Self-Healing Loop
-        if: hashFiles('task_info.env') != ''
+        if: env.TASK_ID != ''
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          export $(cat task_info.env | xargs)
-          
           attempt=0
           max_attempts=3
           success=false
 
           until [ $attempt -ge $max_attempts ]
           do
-            echo "🧪 テストを実行中... (試行 $[$attempt+1]/$max_attempts)"
+            echo "🧪 テストを実行中... (試行 $(($attempt+1))/$max_attempts)"
             
             # あなたのプロジェクトのテストコマンド（例: pnpm test）を実行
             if pnpm test; then
@@ -100,7 +98,7 @@ jobs:
               break
             fi
 
-            attempt=$[$attempt+1]
+            attempt=$(($attempt+1))
             if [ $attempt -lt $max_attempts ]; then
               echo "❌ テストが失敗しました。Geminiにエラーログを送信してコードを自動修正します..."
               # (任意実装) 必要に応じてここでエラーログをパースしてGeminiに投げるスクリプトを実行
@@ -115,12 +113,10 @@ jobs:
 
       # 8. 【条件分岐】成果物をプッシュし、GitHub上でプルリクエスト(PR)を自動作成
       - name: Push Code and Create Pull Request
-        if: hashFiles('task_info.env') != ''
+        if: env.TASK_ID != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub標準のトークンを使用
         run: |
-          export $(cat task_info.env | xargs)
-          
           # 変更をすべてステージングしてコミット
           git add .
           git commit -m "feat($TASK_ID): Geminiによるコードおよびテストの自動生成（テスト通過済み）"
@@ -137,10 +133,8 @@ jobs:
 
       # 9. 【条件分岐】すべての工程が完了したら、Notionのステータスを「Git格納済み」に更新
       - name: Update Notion Status to Git Stored
-        if: hashFiles('task_info.env') != ''
+        if: env.TASK_ID != ''
         run: |
-          export $(cat task_info.env | xargs)
-          
           echo "📝 Notionのタスク（ページID: $PAGE_ID）を『Git格納済み』に更新中..."
           
           curl -X PATCH "https://api.notion.com/v1/pages/$PAGE_ID" \
@@ -149,12 +143,13 @@ jobs:
             -H "Notion-Version: 2022-06-28" \
             --data '{
               "properties": {
-                "Status": {
+                "ステータス": {
                   "status": {
                     "name": "Git格納済み"
                   }
                 }
               }
             }'
+          # 💡 上記の "Status" だった部分を、cron-scheduler.jsに合わせて "ステータス" に修正しました
           
           echo "🎉 すべての自動化プロセスが正常に完了しました！"
