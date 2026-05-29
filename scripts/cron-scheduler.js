@@ -20,7 +20,7 @@ async function checkNotionAndDevelop() {
     },
     body: JSON.stringify({
       filter: {
-        property: "Status",
+        property: "ステータス",
         status: { equals: "Claude生成待ち" }
       },
       page_size: 1 // 1回につき1タスクずつ確実に処理する
