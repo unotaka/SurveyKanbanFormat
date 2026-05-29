@@ -27,7 +27,7 @@ async function fixCode() {
   console.log("🛠️ Geminiがエラーログを解析し、コードの修正案を考えています...");
 
   const response = await ai.models.generateContent({
-    model: "gemini-1.5-pro",
+    model: "gemini-2.5-pro",
     contents: `
       あなたはシニアフルスタックエンジニアです。
       あなたが実装したTypeScriptコードのテストが失敗しました。以下の【元の要件】と【エラーログ】を解析し、バグを修正した正しいコードを出力してください。
