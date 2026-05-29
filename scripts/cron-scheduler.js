@@ -85,6 +85,10 @@ async function checkNotionAndDevelop() {
   const taskId = `${prefix}-${number}`;
 
   console.log(`🎯 対象タスクを発見しました: ${taskId}`);
+  if (!instruction || instruction.trim() === "") {
+    console.error(`❌ エラー: タスク [${taskId}] の「仕様・要件」プロパティが空っぽです。Notion側で指示文を入力してください。`);
+    process.exit(1);
+  }
   console.log(`📝 指示文の内容: ${instruction.substring(0, 30)}...`);
 
   // --- 💡 修正：環境変数ではなく、確実なJSONファイルとして保存する ---

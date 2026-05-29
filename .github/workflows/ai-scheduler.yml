@@ -86,18 +86,24 @@ jobs:
           do
             echo "🧪 テストを実行中... (試行 $(($attempt+1))/$max_attempts)"
             
-            # あなたのプロジェクトのテストコマンド（例: pnpm test）を実行
-            if pnpm test; then
+            # 💡 テストを実行し、同時にエラー出力を test_result.log に保存します
+            # (pnpm test の部分はプロジェクトのテストコマンドに変更してください)
+            if pnpm test > test_result.log 2>&1; then
               echo "✅ テストが正常にパスしました！"
+              cat test_result.log # パスした場合もログを一応出力
               success=true
               break
             fi
 
+            # テスト失敗時、ログをコンソールにも表示して確認できるようにする
+            echo "❌ テストが失敗しました。エラーログはこちら:"
+            cat test_result.log
+            
             attempt=$(($attempt+1))
             if [ $attempt -lt $max_attempts ]; then
-              echo "❌ テストが失敗しました。Geminiにエラーログを送信してコードを自動修正します..."
-              # (任意実装) 必要に応じてここでエラーログをパースしてGeminiに投げるスクリプトを実行
-              # node scripts/gemini-fixer.js
+              echo "🤖 Geminiにエラーログを送信してコードを自律修正させます..."
+              # 💡 先ほど作成した修正スクリプトを実行し、ファイルを書き換える
+              node scripts/gemini-fixer.js
             fi
           done
 
