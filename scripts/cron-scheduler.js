@@ -4,7 +4,7 @@ import fs from "fs";
 
 // 環境変数から必要な各種キーやIDを読み込み
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
-const NOTION_DATABASE_ID = process.env.NOTION_NOTION_DATABASE_ID;
+const NOTION_DATABASE_ID = process.env.NOTION_DATABASE_ID;
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 async function checkNotionAndDevelop() {
