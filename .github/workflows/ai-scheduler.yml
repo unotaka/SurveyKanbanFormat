@@ -48,9 +48,9 @@ jobs:
       - name: Check Notion Database
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          # 💡 前回のログで「NOTION_NOTION_DATABASE_ID」となっていたため、
-          # スクリプトの process.env.NOTION_NOTION_DATABASE_ID に合わせてキー名を変更しています
-          NOTION_NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          # 💡 前回のログで「NOTION_DATABASE_ID」となっていたため、
+          # スクリプトの process.env.NOTION_DATABASE_ID に合わせてキー名を変更しています
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node scripts/cron-scheduler.js
 
