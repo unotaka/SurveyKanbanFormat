@@ -26,7 +26,7 @@ async function generateCode() {
   console.log("🚀 Geminiが要件を解析中...");
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-pro", // 100万トークン対応の賢いモデル
+    model: "gemini-2.5-flash",
     contents: `
       あなたはシニアフルスタックエンジニアです。以下の【要件】を満たすTypeScriptコードを実装してください。
 
