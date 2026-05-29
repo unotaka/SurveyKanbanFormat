@@ -27,7 +27,20 @@ async function checkNotionAndDevelop() {
     })
   });
   
+  // --- デバッグ用のログ追加開始 ---
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`❌ Notion APIがエラーを返しました (Status: ${response.status}):`, errorText);
+    process.exit(1);
+  }
+  // --- デバッグ用のログ追加終了 ---
+
   const data = await response.json();
+  
+  // --- デバッグ用のログ追加開始 ---
+  // どんなデータ（または空の配列）が戻ってきているか生データを確認
+  console.log("📦 Notionからのレスポンス(results):", JSON.stringify(data.results, null, 2));
+  // --- デバッグ用のログ追加終了 ---
   
   // 「Claude生成待ち」のタスクがない場合は、何もせず安全に終了
   if (!data.results || data.results.length === 0) {
