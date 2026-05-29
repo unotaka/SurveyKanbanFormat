@@ -10,6 +10,25 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 async function checkNotionAndDevelop() {
   console.log("🔍 Notionのデータベースをスキャン中...");
 
+  // --- 🔐 安全な環境変数デバッグ開始 ---
+  console.log("--- 🔑 環境変数チェック ---");
+  
+  if (!NOTION_TOKEN) {
+    console.error("🚨 [ERROR] NOTION_TOKEN が完全に空っぽ(undefined)です！GitHub Actionsから渡されていません。");
+  } else {
+    console.log(`✅ NOTION_TOKEN の文字数: ${NOTION_TOKEN.length} 文字`);
+    console.log(`✅ NOTION_TOKEN の開始文字: "${NOTION_TOKEN.substring(0, 7)}..."`);
+  }
+
+  if (!NOTION_DATABASE_ID) {
+    console.error("🚨 [ERROR] NOTION_DATABASE_ID が空っぽです！");
+  } else {
+    console.log(`✅ NOTION_DATABASE_ID の文字数: ${NOTION_DATABASE_ID.length} 文字`);
+  }
+  console.log("------------------------");
+  // --- 🔐 安全な環境変数デバッグ終了 ---
+  
+  
   // 1. Notionから「Claude生成待ち」のタスクを1件だけ検索
   const response = await fetch(`https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query`, {
     method: "POST",
