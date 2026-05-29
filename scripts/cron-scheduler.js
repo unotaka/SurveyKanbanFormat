@@ -89,8 +89,16 @@ async function checkNotionAndDevelop() {
 
   // 3. GitHub Actionsの環境変数に直接格納（複数行の改行にも対応する形式）
   if (process.env.GITHUB_ENV) {
-    // GitHub Actions上での実行時
-    const githubEnvContent = `TASK_ID=${taskId}\nPAGE_ID=${pageId}\nINSTRUCTION<<EOF\n${instruction}\nEOF\n`;
+    // 変数ごとにしっかり改行を挟み、ヒアドキュメントの「=」と「改行」を正確に設定します
+    const githubEnvContent = [
+      `TASK_ID=${taskId}`,
+      `PAGE_ID=${pageId}`,
+      `INSTRUCTION<<EOF`,
+      instruction,
+      `EOF`,
+      "" // 最後に末尾の改行を確保
+    ].join("\n");
+
     fs.appendFileSync(process.env.GITHUB_ENV, githubEnvContent);
     console.log("🚀 GitHub Actions の環境変数にタスク情報を直接格納しました。");
   } else {
